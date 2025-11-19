@@ -1,0 +1,771 @@
+/* ============================================================= */
+/* STYLE TERPUSAT - Sistem Informasi Persediaan                */
+/* CV. KHARISMA WIJAYA ABADI KUSUMA                             */
+/* ============================================================= */
+
+/* ============================================================= */
+/* PART 1: GLOBAL STYLES (Digunakan semua aktor)                */
+/* ============================================================= */
+
+/* 1.1. CSS Reset & Base */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* 1.2. Typography & Font */
+:root {
+    --font-family-primary: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    --font-size-base: 14px;
+    --font-size-small: 12px;
+    --font-size-large: 16px;
+    --font-size-title: 24px;
+    --font-size-heading: 18px;
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-bold: 600;
+}
+
+body {
+    font-family: var(--font-family-primary);
+    font-size: var(--font-size-base);
+    line-height: 1.6;
+}
+
+/* 1.3. Color Palette (Global) */
+:root {
+    /* Primary Colors */
+    --color-primary: #667eea;
+    --color-primary-dark: #764ba2;
+    --color-primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    
+    /* Neutral Colors */
+    --color-text-primary: #2c3e50;
+    --color-text-secondary: #7f8c8d;
+    --color-text-muted: #666;
+    --color-text-light: #ecf0f1;
+    
+    /* Background Colors */
+    --color-bg-primary: #f5f6fa;
+    --color-bg-secondary: #ffffff;
+    --color-bg-dark: #2c3e50;
+    --color-bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    
+    /* Border Colors */
+    --color-border: #ddd;
+    --color-border-light: #ecf0f1;
+    
+    /* Status Colors */
+    --color-success: #27ae60;
+    --color-warning: #f39c12;
+    --color-danger: #e74c3c;
+    --color-info: #3498db;
+    
+    /* Shadow */
+    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 4px 15px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+/* 1.4. Global Background */
+body {
+    background: var(--color-bg-gradient);
+    min-height: 100vh;
+}
+
+body.dashboard-body {
+    background: var(--color-bg-primary);
+}
+
+/* 1.5. Global Form Styles */
+.form-label {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-primary);
+    margin-bottom: 8px;
+}
+
+.form-control {
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    padding: 12px 15px;
+    font-size: var(--font-size-base);
+    transition: all 0.3s ease;
+    font-family: var(--font-family-primary);
+}
+
+.form-control:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+    outline: none;
+}
+
+/* 1.6. Global Button Styles */
+.btn-primary-custom {
+    background: var(--color-primary-gradient);
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-weight: var(--font-weight-bold);
+    color: white;
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+    font-family: var(--font-family-primary);
+}
+
+.btn-primary-custom:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    color: white;
+}
+
+/* 1.7. Global Alert Styles */
+.alert {
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-family: var(--font-family-primary);
+}
+
+/* 1.8. Global Utility Classes */
+.text-gradient {
+    background: var(--color-primary-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.shadow-custom {
+    box-shadow: var(--shadow-md);
+}
+
+.rounded-custom {
+    border-radius: 10px;
+}
+
+/* ============================================================= */
+/* PART 2: LOGIN PAGE (Global - digunakan semua)                */
+/* ============================================================= */
+.login-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+}
+
+.login-container {
+    background: var(--color-bg-secondary);
+    border-radius: 15px;
+    box-shadow: var(--shadow-lg);
+    padding: 40px;
+    width: 100%;
+    max-width: 450px;
+}
+
+.login-title {
+    font-size: 28px;
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-primary);
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+.company-name {
+    font-size: var(--font-size-large);
+    color: var(--color-text-muted);
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.btn-login {
+    background: var(--color-primary-gradient);
+    border: none;
+    border-radius: 8px;
+    padding: 12px;
+    font-weight: var(--font-weight-bold);
+    font-size: var(--font-size-large);
+    width: 100%;
+    color: white;
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+}
+
+.btn-login:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    color: white;
+}
+
+/* ============================================================= */
+/* PART 3: PEMILIK SPECIFIC STYLES                              */
+/* ============================================================= */
+
+/* 3.1. Sidebar (Pemilik) */
+.sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 250px;
+    background: var(--color-bg-dark);
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    overflow-y: auto;
+    transition: width 0.3s ease, transform 0.3s ease;
+}
+
+.sidebar.collapsed {
+    width: 70px;
+}
+
+.sidebar.collapsed .sidebar-header {
+    padding: 20px 10px;
+    font-size: 14px;
+}
+
+.sidebar.collapsed .sidebar-menu a {
+    padding: 15px 10px;
+    text-align: center;
+    font-size: 0;
+    position: relative;
+    justify-content: center;
+}
+
+.sidebar.collapsed .sidebar-menu a::before {
+    content: attr(data-icon);
+    font-size: 20px;
+    display: block;
+    line-height: 1;
+}
+
+.sidebar.collapsed .sidebar-menu a span {
+    display: none;
+}
+
+.sidebar.collapsed .sidebar-menu a:hover {
+    padding-left: 10px;
+    background: rgba(102, 126, 234, 0.3);
+}
+
+.sidebar-header {
+    background: var(--color-primary-gradient);
+    padding: 20px;
+    color: white;
+    text-align: center;
+    font-weight: var(--font-weight-bold);
+    font-size: var(--font-size-heading);
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.sidebar-toggle {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: white;
+    width: 30px;
+    height: 30px;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    font-size: var(--font-size-large);
+}
+
+.sidebar-toggle:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.sidebar.collapsed .sidebar-toggle {
+    right: 50%;
+    transform: translate(50%, -50%);
+}
+
+.sidebar-menu {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.sidebar-menu li {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-menu a {
+    display: block;
+    padding: 15px 20px;
+    color: var(--color-text-light);
+    text-decoration: none;
+    transition: all 0.3s ease;
+    font-size: var(--font-size-base);
+}
+
+.sidebar-menu a:hover {
+    background: rgba(102, 126, 234, 0.3);
+    color: white;
+    padding-left: 25px;
+}
+
+.sidebar-menu a.active {
+    background: var(--color-primary-gradient);
+    color: white;
+    font-weight: var(--font-weight-bold);
+}
+
+/* 3.2. Main Content (Pemilik) */
+.main-content {
+    margin-left: 250px;
+    min-height: 100vh;
+    background: var(--color-bg-primary);
+    padding: 20px;
+    transition: margin-left 0.3s ease;
+}
+
+body.sidebar-collapsed .main-content {
+    margin-left: 70px;
+}
+
+.page-header {
+    background: var(--color-bg-secondary);
+    padding: 20px 30px;
+    border-radius: 10px;
+    margin-bottom: 30px;
+    box-shadow: var(--shadow-sm);
+}
+
+.page-title {
+    font-size: var(--font-size-title);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-primary);
+    margin: 0;
+}
+
+/* 3.3. Dashboard Cards (Pemilik) */
+.dashboard-container {
+    background: var(--color-bg-secondary);
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.dashboard-header {
+    background: var(--color-primary-gradient);
+    color: white;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 30px;
+    box-shadow: var(--shadow-md);
+}
+
+.dashboard-title {
+    font-size: var(--font-size-title);
+    font-weight: var(--font-weight-bold);
+    margin-bottom: 5px;
+}
+
+.dashboard-subtitle {
+    font-size: var(--font-size-base);
+    opacity: 0.9;
+}
+
+.stat-card {
+    background: var(--color-bg-secondary);
+    border-radius: 10px;
+    padding: 30px;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.2s, box-shadow 0.2s;
+    margin-bottom: 20px;
+}
+
+.stat-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+}
+
+.stat-value {
+    font-size: 36px;
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-primary);
+    margin-bottom: 10px;
+}
+
+.stat-label {
+    font-size: var(--font-size-base);
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-card.primary .stat-value {
+    color: var(--color-primary);
+}
+
+.stat-card.success .stat-value {
+    color: var(--color-success);
+}
+
+.stat-card.warning .stat-value {
+    color: var(--color-warning);
+}
+
+.stat-card.danger .stat-value {
+    color: var(--color-danger);
+}
+
+/* 3.4. Table Styles (Pemilik) */
+.table-custom {
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.table-custom thead {
+    background: var(--color-primary-gradient);
+    color: white;
+}
+
+.table-custom thead th {
+    border: none;
+    padding: 12px 15px;
+    font-weight: var(--font-weight-bold);
+}
+
+.table-custom tbody tr {
+    transition: background-color 0.2s;
+}
+
+.table-custom tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.table-section {
+    background: var(--color-bg-secondary);
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 30px;
+    box-shadow: var(--shadow-sm);
+}
+
+.table-section-title {
+    font-size: var(--font-size-heading);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-text-primary);
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--color-border-light);
+}
+
+.btn-view {
+    background: var(--color-primary-gradient);
+    border: none;
+    color: white;
+    padding: 6px 15px;
+    border-radius: 5px;
+    font-size: var(--font-size-small);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.btn-view:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 3px 10px rgba(102, 126, 234, 0.3);
+    color: white;
+}
+
+.btn-view.btn-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+    width: 100%;
+    margin-bottom: 3px;
+}
+
+/* 3.5. Search Bar (Pemilik) */
+.search-container {
+    background: var(--color-bg-secondary);
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-sm);
+}
+
+.search-box {
+    position: relative;
+    max-width: 500px;
+}
+
+.search-box input {
+    padding: 12px 45px 12px 15px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    width: 100%;
+    font-size: var(--font-size-base);
+    transition: all 0.3s ease;
+}
+
+.search-box input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+    outline: none;
+}
+
+.search-box .search-icon {
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-secondary);
+    font-size: 18px;
+    pointer-events: none;
+}
+
+/* 3.6. Card Styles (Pemilik) */
+.card-custom {
+    border-radius: 10px;
+    border: none;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.2s, box-shadow 0.2s;
+    margin-bottom: 20px;
+}
+
+.card-custom:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+}
+
+.card-header-custom {
+    background: var(--color-primary-gradient);
+    color: white;
+    border-radius: 10px 10px 0 0 !important;
+    padding: 15px 20px;
+    font-weight: var(--font-weight-bold);
+}
+
+/* 3.7. DataTables Styles (Pemilik) */
+.dataTables_wrapper {
+    padding-top: 20px;
+}
+
+.dataTables_wrapper .dataTables_length,
+.dataTables_wrapper .dataTables_filter {
+    margin-bottom: 15px;
+}
+
+.dataTables_wrapper .dataTables_length label,
+.dataTables_wrapper .dataTables_filter label {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-primary);
+}
+
+.dataTables_wrapper .dataTables_length select,
+.dataTables_wrapper .dataTables_filter input {
+    border: 1px solid var(--color-border);
+    border-radius: 5px;
+    padding: 5px 10px;
+    margin: 0 5px;
+}
+
+.dataTables_wrapper .dataTables_filter input {
+    width: 200px;
+}
+
+.dataTables_wrapper .dataTables_filter input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+    outline: none;
+}
+
+.dataTables_wrapper .dataTables_info {
+    color: var(--color-text-secondary);
+    padding-top: 10px;
+}
+
+.dataTables_wrapper .dataTables_paginate {
+    padding-top: 10px;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button {
+    padding: 5px 10px;
+    margin: 0 2px;
+    border: 1px solid var(--color-border);
+    border-radius: 5px;
+    background: var(--color-bg-secondary);
+    color: var(--color-text-primary) !important;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+    background: var(--color-primary-gradient);
+    color: white !important;
+    border-color: var(--color-primary);
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button.current {
+    background: var(--color-primary-gradient);
+    color: white !important;
+    border-color: var(--color-primary);
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.dataTables_wrapper .table-custom {
+    margin-top: 0;
+}
+
+.dataTables_wrapper .table-custom thead th {
+    background: var(--color-primary-gradient);
+    color: white;
+    border: none;
+    padding: 12px 15px;
+    font-weight: var(--font-weight-bold);
+}
+
+.dataTables_wrapper .table-custom tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+/* ============================================================= */
+/* PART 4: TOKO SPECIFIC STYLES (Untuk aktor Toko)              */
+/* ============================================================= */
+/* Styles khusus untuk aktor Toko bisa ditambahkan di sini */
+/* Contoh: .toko-sidebar { ... } */
+
+/* ============================================================= */
+/* PART 5: GUDANG SPECIFIC STYLES (Untuk aktor Gudang)          */
+/* ============================================================= */
+/* Styles khusus untuk aktor Gudang bisa ditambahkan di sini */
+/* Contoh: .gudang-sidebar { ... } */
+
+/* ============================================================= */
+/* PART 6: SUPPLIER SPECIFIC STYLES (Untuk aktor Supplier)      */
+/* ============================================================= */
+/* Styles khusus untuk aktor Supplier bisa ditambahkan di sini */
+/* Contoh: .supplier-sidebar { ... } */
+
+/* ============================================================= */
+/* PART 7: RESPONSIVE STYLES (Global)                           */
+/* ============================================================= */
+@media (max-width: 768px) {
+    .login-container {
+        padding: 30px 20px;
+        margin: 20px;
+    }
+    
+    .login-title {
+        font-size: 24px;
+    }
+    
+    .company-name {
+        font-size: var(--font-size-base);
+    }
+    
+    .dashboard-header {
+        padding: 15px;
+    }
+    
+    .dashboard-title {
+        font-size: 20px;
+    }
+    
+    .sidebar {
+        width: 200px;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+    }
+    
+    .sidebar.active {
+        transform: translateX(0);
+    }
+    
+    .main-content {
+        margin-left: 0;
+    }
+    
+    .stat-value {
+        font-size: 28px;
+    }
+    
+    .dataTables_wrapper .dataTables_length,
+    .dataTables_wrapper .dataTables_filter {
+        text-align: left;
+        margin-bottom: 10px;
+    }
+    
+    .dataTables_wrapper .dataTables_filter input {
+        width: 100%;
+        margin-top: 5px;
+    }
+}
+
+/* 3.8. Modal Styles (Pemilik) */
+.modal-content {
+    border-radius: 10px;
+    border: none;
+    box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+    border-radius: 10px 10px 0 0;
+    border-bottom: none;
+}
+
+.modal-footer {
+    border-top: 1px solid var(--color-border-light);
+    border-radius: 0 0 10px 10px;
+}
+
+.modal-body {
+    padding: 25px;
+}
+
+.modal-body .form-label {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-primary);
+    margin-bottom: 8px;
+}
+
+.modal-body .form-control {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 10px 15px;
+    font-size: var(--font-size-base);
+    transition: all 0.3s ease;
+}
+
+.modal-body .form-control:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+    outline: none;
+}
+
+.modal-body small.text-muted {
+    font-size: var(--font-size-small);
+    color: var(--color-text-secondary);
+    display: block;
+    margin-top: 5px;
+}
+
+.modal-footer .btn-secondary {
+    background: #6c757d;
+    border: none;
+    color: white;
+    padding: 8px 20px;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.modal-footer .btn-secondary:hover {
+    background: #5a6268;
+    color: white;
+}
+
+/* ============================================================= */
+/* END OF STYLE                                                  */
+/* ============================================================= */
