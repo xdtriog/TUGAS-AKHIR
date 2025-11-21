@@ -57,6 +57,7 @@ CREATE TABLE DETAIL_TRANSFER_BARANG (
    ID_DETAIL_TRANSFER_BARANG    VARCHAR(16) NOT NULL,
    ID_TRANSFER_BARANG           VARCHAR(16),
    KD_BARANG                    VARCHAR(16),
+   JUMLAH_MINTA_TRANSFER_DUS    INT,
    JUMLAH_KIRIM_DUS             INT,
    JUMLAH_DITOLAK_DUS           INT,
    TOTAL_MASUK_DUS              INT,
@@ -218,6 +219,7 @@ CREATE TABLE STOCK_HISTORY (
    JUMLAH_AKHIR           INT,
    TIPE_PERUBAHAN         ENUM('PEMESANAN', 'TRANSFER', 'OPNAME', 'RUSAK'),
    REF                    VARCHAR(16),
+   SATUAN                 ENUM('PIECES', 'DUS'),
    WAKTU_CHANGE           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
    PRIMARY KEY (ID_HISTORY_STOCK)
 );
@@ -243,7 +245,7 @@ CREATE TABLE TRANSFER_BARANG (
    KD_LOKASI_TUJUAN       VARCHAR(8),
    WAKTU_PESAN_TRANSFER   TIMESTAMP NULL,
    WAKTU_KIRIM_TRANSFER   TIMESTAMP NULL,
-   WAKTU_TIBA_TRANSFER    TIMESTAMP NULL,
+   WAKTU_SELESAI_TRANSFER    TIMESTAMP NULL,
    STATUS                 ENUM('DIPESAN', 'DIKIRIM', 'DIBATALKAN', 'SELESAI'),
    PRIMARY KEY (ID_TRANSFER_BARANG)
 );
@@ -314,30 +316,57 @@ ALTER TABLE TRANSFER_BARANG ADD CONSTRAINT FK_TRF_TUJUAN FOREIGN KEY (KD_LOKASI_
 ALTER TABLE USERS ADD CONSTRAINT FK_USERS_LOKASI FOREIGN KEY (KD_LOKASI) REFERENCES MASTER_LOKASI (KD_LOKASI);
 ALTER TABLE USERS ADD CONSTRAINT FK_USERS_SUPPLIER FOREIGN KEY (KD_SUPPLIER) REFERENCES MASTER_SUPPLIER (KD_SUPPLIER);
 
+--
+-- Dumping data untuk tabel `master_kategori_barang`
+--
 INSERT INTO `master_kategori_barang` (`KD_KATEGORI_BARANG`, `NAMA_KATEGORI`, `STATUS`) VALUES
+('cx7xRUzL', 'Nugget', 'AKTIF'),
 ('N9YZGVmr', 'Sosis', 'AKTIF');
 
+--
+-- Dumping data untuk tabel `master_lokasi`
+--
 INSERT INTO `master_lokasi` (`KD_LOKASI`, `NAMA_LOKASI`, `TYPE_LOKASI`, `ALAMAT_LOKASI`, `MAX_STOCK_TOTAL`, `SATUAN`, `STATUS`) VALUES
 ('NRb2W8VG', 'Gudang Pusat Bekasi', 'gudang', 'Jl. Narogong Km.12 Bekasi', 2000, 'DUS', 'AKTIF'),
 ('NsHmYgfe', 'Toko Bekasi Timur', 'toko', 'Ruko Harapan Indah Boulevard', 5000, 'PIECES', 'AKTIF');
 
+--
+-- Dumping data untuk tabel `master_merek`
+--
 INSERT INTO `master_merek` (`KD_MEREK_BARANG`, `NAMA_MEREK`, `STATUS`) VALUES
+('ckDceFJK', 'Fiesta', 'AKTIF'),
 ('N6EKB1pQ', 'So Nice', 'AKTIF');
 
+--
+-- Dumping data untuk tabel `master_supplier`
+--
 INSERT INTO `master_supplier` (`KD_SUPPLIER`, `NAMA_SUPPLIER`, `ALAMAT_SUPPLIER`, `PIC_SUPPLIER`, `NOTELP_SUPPLIER`, `STATUS`) VALUES
 ('NGP9zHgE', 'UD. Dingin Abadi', 'Cikarang', 'Ahmad', '081234567890', 'AKTIF'),
 ('NKnVD9E9', 'CV. Frozen Makmur', 'Depok', 'Siti', '02187998877', 'AKTIF');
 
+--
+-- Dumping data untuk tabel `master_barang`
+--
 INSERT INTO `master_barang` (`KD_BARANG`, `KD_KATEGORI_BARANG`, `KD_SUPPLIER`, `KD_MEREK_BARANG`, `NAMA_BARANG`, `BERAT`, `AVG_HARGA_BELI`, `HARGA_JUAL_BARANG`, `SATUAN_PERDUS`, `LAST_UPDATED`, `STATUS`) VALUES
-('eUWs4LaKPAznNALL', 'N9YZGVmr', NULL, 'N6EKB1pQ', 'Keju Dinosaurus', 200, NULL, NULL, 20, '2025-11-19 09:38:40', 'AKTIF');
+('4aCSBjQPd3TzFd90', 'cx7xRUzL', NULL, 'ckDceFJK', 'Fiesta Chicken Nugget', 250, NULL, NULL, 25, '2025-11-21 09:43:02', 'AKTIF'),
+('W8r1LuGwd932W3Zq', 'N9YZGVmr', NULL, 'N6EKB1pQ', 'So Nice Sosis Ayam Keju', 50, NULL, NULL, 10, '2025-11-21 09:43:24', 'AKTIF');
 
+--
+--
+-- Dumping data untuk tabel `stock`
+--
 INSERT INTO `stock` (`KD_BARANG`, `KD_LOKASI`, `UPDATED_BY`, `JUMLAH_BARANG`, `LAST_UPDATED`, `JUMLAH_MIN_STOCK`, `JUMLAH_MAX_STOCK`, `SATUAN`) VALUES
-('eUWs4LaKPAznNALL', 'NRb2W8VG', 'OWNR3f8x', 0, '2025-11-19 09:38:40', NULL, NULL, 'DUS'),
-('eUWs4LaKPAznNALL', 'NsHmYgfe', 'OWNR3f8x', 0, '2025-11-19 09:38:40', NULL, NULL, 'PIECES');
+('4aCSBjQPd3TzFd90', 'NRb2W8VG', 'OWNR3f8x', 0, '2025-11-21 09:44:11', NULL, 100, 'DUS'),
+('4aCSBjQPd3TzFd90', 'NsHmYgfe', 'OWNR3f8x', 0, '2025-11-21 09:44:53', 30, 100, 'PIECES'),
+('W8r1LuGwd932W3Zq', 'NRb2W8VG', 'OWNR3f8x', 0, '2025-11-21 09:44:30', NULL, 30, 'DUS'),
+('W8r1LuGwd932W3Zq', 'NsHmYgfe', 'OWNR3f8x', 0, '2025-11-21 09:45:06', 10, 50, 'PIECES');
 
+--
+-- Dumping data untuk tabel `users`
+--
 INSERT INTO `users` (`ID_USERS`, `KD_LOKASI`, `KD_SUPPLIER`, `NAMA`, `USERNAME`, `PASSWORD`, `STATUS`) VALUES
-('OWNR3f8x', NULL, NULL, 'Kevin', 'owner', 'password', 'AKTIF'),
 ('GDNGj825', 'NRb2W8VG', NULL, 'Yudi', 'gudang1', 'password', 'AKTIF'),
+('OWNR3f8x', NULL, NULL, 'Kevin', 'owner', 'password', 'AKTIF'),
 ('TOKOeLig', 'NsHmYgfe', NULL, 'Hendro', 'toko1', 'password', 'AKTIF');
 
 /* ============================================================= */

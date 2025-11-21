@@ -375,7 +375,10 @@ $active_page = 'stock';
                                     <?php while ($row = $result_stock->fetch_assoc()): ?>
                                         <option value="<?php echo htmlspecialchars($row['KD_BARANG']); ?>" 
                                                 data-max-stock="<?php echo $row['JUMLAH_MAX_STOCK']; ?>">
-                                            <?php echo htmlspecialchars($row['KD_BARANG'] . ' - ' . $row['NAMA_BARANG']); ?>
+                                            <?php 
+                                            $display_text = $row['KD_BARANG'] . '-' . $row['NAMA_MEREK'] . '-' . $row['NAMA_KATEGORI'] . '-' . $row['NAMA_BARANG'] . '-' . number_format($row['BERAT'], 0, ',', '.');
+                                            echo htmlspecialchars($display_text);
+                                            ?>
                                         </option>
                                     <?php endwhile; ?>
                                 <?php endif; ?>

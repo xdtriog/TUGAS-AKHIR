@@ -200,7 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         }
         
         // Get stock saat ini
-        $query_stock = "SELECT JUMLAH_BARANG FROM STOCK WHERE KD_BARANG = ? AND KD_LOKASI = ?";
+        $query_stock = "SELECT JUMLAH_BARANG, SATUAN FROM STOCK WHERE KD_BARANG = ? AND KD_LOKASI = ?";
         $stmt_stock = $conn->prepare($query_stock);
         $stmt_stock->bind_param("ss", $kd_barang, $kd_lokasi);
         $stmt_stock->execute();
@@ -210,6 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             $stock_data = $result_stock->fetch_assoc();
             $jumlah_awal = $stock_data['JUMLAH_BARANG'];
             $jumlah_akhir = $jumlah_awal + $total_masuk;
+            $satuan = $stock_data['SATUAN'];
             
             // Update STOCK
             $update_stock = "UPDATE STOCK 
@@ -234,13 +235,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
             
             $insert_history = "INSERT INTO STOCK_HISTORY 
-                              (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, 'PEMESANAN', ?)";
+                              (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, 'PEMESANAN', ?, ?)";
             $stmt_history = $conn->prepare($insert_history);
             if (!$stmt_history) {
                 throw new Exception('Gagal prepare query insert history: ' . $conn->error);
             }
-            $stmt_history->bind_param("ssssiiis", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal, $total_masuk, $jumlah_akhir, $id_pesan);
+            $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal, $total_masuk, $jumlah_akhir, $id_pesan, $satuan);
             if (!$stmt_history->execute()) {
                 throw new Exception('Gagal insert history: ' . $stmt_history->error);
             }
