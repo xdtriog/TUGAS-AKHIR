@@ -39,10 +39,12 @@ $nama_lokasi = $user_data['NAMA_LOKASI'] ?? 'Gudang';
 $query_stock = "SELECT 
                     s.KD_BARANG,
                     mb.NAMA_BARANG,
+                    mb.BERAT,
                     COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
                     COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
-                    s.JUMLAH_BARANG as JUMLAH_BARANG,
-                    s.SATUAN
+                    s.JUMLAH_BARANG as STOCK_SEKARANG,
+                    s.SATUAN,
+                    s.LAST_UPDATED
                 FROM STOCK s
                 INNER JOIN MASTER_BARANG mb ON s.KD_BARANG = mb.KD_BARANG
                 LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
@@ -53,6 +55,23 @@ $stmt_stock = $conn->prepare($query_stock);
 $stmt_stock->bind_param("s", $kd_lokasi);
 $stmt_stock->execute();
 $result_stock = $stmt_stock->get_result();
+
+// Format tanggal dan waktu Indonesia
+function formatTanggalWaktu($tanggal) {
+    if (empty($tanggal) || $tanggal == null) {
+        return '-';
+    }
+    $bulan = [
+        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
+        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
+        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
+    ];
+    $date = new DateTime($tanggal);
+    $tanggal_formatted = $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    $waktu_formatted = $date->format('H:i') . ' WIB';
+    
+    return $tanggal_formatted . ' ' . $waktu_formatted;
+}
 
 // Set active page untuk sidebar
 $active_page = 'dashboard';
@@ -90,8 +109,10 @@ $active_page = 'dashboard';
                             <th>Merek Barang</th>
                             <th>Kategori Barang</th>
                             <th>Nama Barang</th>
-                            <th>Jumlah Barang</th>
+                            <th>Berat (gr)</th>
+                            <th>Stock Sekarang</th>
                             <th>Satuan</th>
+                            <th>Terakhir Update</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -102,8 +123,10 @@ $active_page = 'dashboard';
                                     <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
-                                    <td><?php echo number_format($row['JUMLAH_BARANG'], 0, ',', '.'); ?></td>
+                                    <td><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
+                                    <td><?php echo number_format($row['STOCK_SEKARANG'], 0, ',', '.'); ?></td>
                                     <td><?php echo htmlspecialchars($row['SATUAN']); ?></td>
+                                    <td><?php echo formatTanggalWaktu($row['LAST_UPDATED']); ?></td>
                                 </tr>
                             <?php endwhile; ?>
                         <?php endif; ?>
@@ -135,7 +158,10 @@ $active_page = 'dashboard';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[3, 'asc']], // Sort by Nama Barang
+                order: [[3, 'asc']], // Sort by Nama Barang (index 3)
+                columnDefs: [
+                    { orderable: false, targets: [] } // All columns are sortable
+                ],
                 scrollX: true, // Enable horizontal scrolling for responsive
                 autoWidth: false, // Disable auto width calculation
                 width: '100%', // Set width to 100%

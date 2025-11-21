@@ -3,7 +3,7 @@ session_start();
 require_once '../dbconnect.php';
 
 // Cek apakah user sudah login
-if (!isset($_SESSION['user_id']) || $_SESSION['permision'] != 1) {
+if (!isset($_SESSION['user_id']) || substr($_SESSION['user_id'], 0, 4) != 'OWNR') {
     header("Location: ../index.php");
     exit();
 }
@@ -24,7 +24,7 @@ $query_po = "SELECT
     pb.KD_SUPPLIER,
     pb.JUMLAH_PESAN_BARANG_DUS,
     pb.HARGA_PESAN_BARANG_DUS,
-    pb.JUMLAH_DITERIMA_DUS,
+    pb.TOTAL_MASUK_DUS,
     pb.JUMLAH_DITOLAK_DUS,
     pb.WAKTU_PESAN,
     pb.STATUS,
@@ -187,7 +187,7 @@ function formatRupiah($angka) {
             color: white;
         }
         
-        .watermark.tiba span {
+        .watermark.selesai span {
             background-color: #28a745;
             color: white;
         }
@@ -234,7 +234,7 @@ function formatRupiah($angka) {
                     <th>Kategori Barang</th>
                     <th>Nama Barang</th>
                     <th>Berat (gr)</th>
-                    <th>Jumlah (dus)</th>
+                    <th>Jumlah Pesan (dus)</th>
                 </tr>
             </thead>
             <tbody>
@@ -252,9 +252,9 @@ function formatRupiah($angka) {
         <div class="watermark dibatalkan">
             <span>DIBATALKAN</span>
         </div>
-        <?php elseif ($po['STATUS'] == 'TIBA'): ?>
-        <div class="watermark tiba">
-            <span>TIBA</span>
+        <?php elseif ($po['STATUS'] == 'SELESAI'): ?>
+        <div class="watermark selesai">
+            <span>SELESAI</span>
         </div>
         <?php endif; ?>
     </div>

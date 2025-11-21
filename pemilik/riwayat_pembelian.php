@@ -3,61 +3,8 @@ session_start();
 require_once '../dbconnect.php';
 
 // Cek apakah user sudah login
-if (!isset($_SESSION['user_id']) || $_SESSION['permision'] != 1) {
+if (!isset($_SESSION['user_id']) || substr($_SESSION['user_id'], 0, 4) != 'OWNR') {
     header("Location: ../index.php");
-    exit();
-}
-
-// Handle AJAX request untuk get PO data
-if (isset($_GET['get_po_data']) && $_GET['get_po_data'] == '1') {
-    $id_pesan = isset($_GET['id_pesan']) ? trim($_GET['id_pesan']) : '';
-    
-    if (!empty($id_pesan)) {
-        $query_po = "SELECT 
-            pb.ID_PESAN_BARANG,
-            pb.KD_BARANG,
-            pb.KD_LOKASI,
-            pb.KD_SUPPLIER,
-            pb.JUMLAH_PESAN_BARANG_DUS,
-            pb.HARGA_PESAN_BARANG_DUS,
-            pb.JUMLAH_DITERIMA_DUS,
-            pb.JUMLAH_DITOLAK_DUS,
-            pb.WAKTU_PESAN,
-            pb.STATUS,
-            mb.NAMA_BARANG,
-            mb.BERAT,
-            COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
-            COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
-            COALESCE(ms.KD_SUPPLIER, '-') as SUPPLIER_KD,
-            COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER,
-            COALESCE(ms.ALAMAT_SUPPLIER, '-') as ALAMAT_SUPPLIER,
-            ml.NAMA_LOKASI,
-            ml.ALAMAT_LOKASI
-        FROM PESAN_BARANG pb
-        LEFT JOIN MASTER_BARANG mb ON pb.KD_BARANG = mb.KD_BARANG
-        LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
-        LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
-        LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
-        LEFT JOIN MASTER_LOKASI ml ON pb.KD_LOKASI = ml.KD_LOKASI
-        WHERE pb.ID_PESAN_BARANG = ?";
-        $stmt_po = $conn->prepare($query_po);
-        $stmt_po->bind_param("s", $id_pesan);
-        $stmt_po->execute();
-        $result_po = $stmt_po->get_result();
-        
-        if ($result_po->num_rows > 0) {
-            $po_data = $result_po->fetch_assoc();
-            header('Content-Type: application/json');
-            echo json_encode([
-                'success' => true,
-                'data' => $po_data
-            ]);
-            exit();
-        }
-    }
-    
-    header('Content-Type: application/json');
-    echo json_encode(['success' => false, 'message' => 'Data PO tidak ditemukan']);
     exit();
 }
 
@@ -149,9 +96,10 @@ $query_riwayat = "SELECT
     pb.KD_SUPPLIER,
     pb.JUMLAH_PESAN_BARANG_DUS,
     pb.HARGA_PESAN_BARANG_DUS,
-    pb.JUMLAH_DITERIMA_DUS,
+    pb.TOTAL_MASUK_DUS,
     pb.JUMLAH_DITOLAK_DUS,
     pb.WAKTU_PESAN,
+    pb.WAKTU_ESTIMASI_SAMPAI,
     pb.WAKTU_SAMPAI,
     pb.STATUS,
     ml.NAMA_LOKASI,
@@ -188,7 +136,7 @@ function formatTanggalWaktu($tanggal) {
 }
 
 // Format waktu dengan badge untuk kolom waktu (stack)
-function formatWaktuStack($waktu_pesan, $waktu_sampai, $status) {
+function formatWaktuStack($waktu_pesan, $waktu_estimasi, $waktu_sampai, $status) {
     $bulan = [
         1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
         5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
@@ -197,14 +145,25 @@ function formatWaktuStack($waktu_pesan, $waktu_sampai, $status) {
     
     $html = '<div class="d-flex flex-column gap-1">';
     
-    // Waktu diterima (jika ada WAKTU_SAMPAI dan status TIBA) - tampilkan di atas
-    if (!empty($waktu_sampai) && $status == 'TIBA') {
+    // Waktu diterima (jika ada WAKTU_SAMPAI dan status SELESAI) - tampilkan di atas
+    if (!empty($waktu_sampai) && $status == 'SELESAI') {
         $date_sampai = new DateTime($waktu_sampai);
         $tanggal_sampai = $date_sampai->format('d') . ' ' . $bulan[(int)$date_sampai->format('m')] . ' ' . $date_sampai->format('Y');
         $waktu_sampai_formatted = $date_sampai->format('H:i') . ' WIB';
         $html .= '<div>';
         $html .= htmlspecialchars($tanggal_sampai . ' ' . $waktu_sampai_formatted) . ' ';
         $html .= '<span class="badge bg-success">DITERIMA</span>';
+        $html .= '</div>';
+    }
+    
+    // Waktu estimasi - tampilkan di tengah (jika ada)
+    if (!empty($waktu_estimasi)) {
+        $date_estimasi = new DateTime($waktu_estimasi);
+        $tanggal_estimasi = $date_estimasi->format('d') . ' ' . $bulan[(int)$date_estimasi->format('m')] . ' ' . $date_estimasi->format('Y');
+        $waktu_estimasi_formatted = $date_estimasi->format('H:i') . ' WIB';
+        $html .= '<div>';
+        $html .= htmlspecialchars($tanggal_estimasi . ' ' . $waktu_estimasi_formatted) . ' ';
+        $html .= '<span class="badge bg-info">ESTIMASI</span>';
         $html .= '</div>';
     }
     
@@ -330,16 +289,16 @@ $active_page = 'stock';
                                         echo $supplier_display;
                                         ?>
                                     </td>
-                                    <td><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_SAMPAI'], $row['STATUS']); ?></td>
+                                    <td><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_ESTIMASI_SAMPAI'], $row['WAKTU_SAMPAI'], $row['STATUS']); ?></td>
                                     <td><?php echo $row['JUMLAH_PESAN_BARANG_DUS'] ? number_format($row['JUMLAH_PESAN_BARANG_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo htmlspecialchars($row['SATUAN'] ?? 'Dus'); ?></td>
-                                    <td><?php echo $row['JUMLAH_DITERIMA_DUS'] ? number_format($row['JUMLAH_DITERIMA_DUS'], 0, ',', '.') : '-'; ?></td>
+                                    <td><?php echo $row['TOTAL_MASUK_DUS'] ? number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['JUMLAH_DITOLAK_DUS'] ? number_format($row['JUMLAH_DITOLAK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo formatRupiah($row['HARGA_PESAN_BARANG_DUS']); ?></td>
                                     <td><?php 
                                         $total_bayar = 0;
-                                        if ($row['JUMLAH_DITERIMA_DUS'] && $row['HARGA_PESAN_BARANG_DUS']) {
-                                            $total_bayar = $row['JUMLAH_DITERIMA_DUS'] * $row['HARGA_PESAN_BARANG_DUS'];
+                                        if ($row['TOTAL_MASUK_DUS'] && $row['HARGA_PESAN_BARANG_DUS']) {
+                                            $total_bayar = $row['TOTAL_MASUK_DUS'] * $row['HARGA_PESAN_BARANG_DUS'];
                                         }
                                         echo formatRupiah($total_bayar);
                                     ?></td>
@@ -356,8 +315,8 @@ $active_page = 'stock';
                                                 $status_text = 'Dikirim';
                                                 $status_class = 'info';
                                                 break;
-                                            case 'TIBA':
-                                                $status_text = 'Diterima';
+                                            case 'SELESAI':
+                                                $status_text = 'Selesai';
                                                 $status_class = 'success';
                                                 break;
                                             case 'DIBATALKAN':
@@ -391,60 +350,17 @@ $active_page = 'stock';
 
     <!-- Modal Lihat PO -->
     <div class="modal fade" id="modalLihatPO" tabindex="-1" aria-labelledby="modalLihatPOLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-                    <h5 class="modal-title" id="modalLihatPOLabel"></h5>
+                    <h5 class="modal-title" id="modalLihatPOLabel">Lihat Purchase Order</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="modal-body" id="poContent">
-                    <div class="text-center mb-3">
-                        <h4>CV. KHARISMA WIJAYA ABADI KUSUMA</h4>
-                        <p class="mb-0">JL. Rembang - 0813653985</p>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Kode PO:</label>
-                        <input type="text" class="form-control" id="po_kode" readonly style="background-color: #e9ecef;">
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Ke:</label>
-                        <input type="text" class="form-control" id="po_supplier" readonly style="background-color: #e9ecef;">
-                    </div>
-                    
-                    <div class="table-responsive">
-                        <table class="table table-bordered">
-                            <thead>
-                                <tr>
-                                    <th>Merek Barang</th>
-                                    <th>Kategori Barang</th>
-                                    <th>Nama Barang</th>
-                                    <th>Berat (gr)</th>
-                                    <th>Jumlah (dus)</th>
-                                </tr>
-                            </thead>
-                            <tbody id="poTableBody">
-                                <tr>
-                                    <td colspan="5" class="text-center">Memuat data...</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    
-                    <div id="poDibatalkan" class="text-center mt-3" style="display: none;">
-                        <span class="badge bg-danger fs-6 p-3">DIBATALKAN</span>
-                    </div>
+                <div class="modal-body p-0" style="height: 80vh; overflow: hidden;">
+                    <iframe id="poIframe" src="" style="width: 100%; height: 100%; border: none;"></iframe>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
-                    <button type="button" class="btn-primary-custom" id="btnDownloadPO">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-download" viewBox="0 0 16 16" style="display: inline-block; margin-right: 8px;">
-                            <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
-                            <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
-                        </svg>
-                        Download PDF
-                    </button>
                 </div>
             </div>
         </div>
@@ -491,122 +407,14 @@ $active_page = 'stock';
             });
         });
 
-        var currentPOId = null;
-        
         function lihatPO(idPesan) {
-            currentPOId = idPesan;
-            
-            // Reset modal content
-            $('#poContent').html('<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>');
+            // Set iframe source ke download_po.php
+            $('#poIframe').attr('src', 'download_po.php?id_pesan=' + encodeURIComponent(idPesan));
             
             // Buka modal
             var modal = new bootstrap.Modal(document.getElementById('modalLihatPO'));
             modal.show();
-            
-            // Ambil data PO
-            $.ajax({
-                url: '',
-                method: 'GET',
-                data: {
-                    get_po_data: '1',
-                    id_pesan: idPesan
-                },
-                dataType: 'json',
-                success: function(response) {
-                    if (response.success) {
-                        var po = response.data;
-                        
-                        // Set header
-                        var headerHtml = '<div class="text-center mb-3">' +
-                            '<h4>CV. KHARISMA WIJAYA ABADI KUSUMA</h4>' +
-                            '<p class="mb-0">JL. Rembang - 0813653985</p>' +
-                            '</div>';
-                        
-                        // Set Kode PO
-                        var kodePO = '<div class="mb-3">' +
-                            '<label class="form-label fw-bold">Kode PO:</label>' +
-                            '<input type="text" class="form-control" id="po_kode" value="' + escapeHtml(po.ID_PESAN_BARANG) + '" readonly style="background-color: #e9ecef;">' +
-                            '</div>';
-                        
-                        // Set Supplier
-                        var supplierText = '';
-                        if (po.SUPPLIER_KD != '-' && po.NAMA_SUPPLIER != '-') {
-                            supplierText = po.NAMA_SUPPLIER;
-                            if (po.ALAMAT_SUPPLIER != '-') {
-                                supplierText += ' - ' + po.ALAMAT_SUPPLIER;
-                            }
-                        } else {
-                            supplierText = '-';
-                        }
-                        var supplierField = '<div class="mb-3">' +
-                            '<label class="form-label fw-bold">Ke:</label>' +
-                            '<input type="text" class="form-control" id="po_supplier" value="' + escapeHtml(supplierText) + '" readonly style="background-color: #e9ecef;">' +
-                            '</div>';
-                        
-                        // Set table
-                        var tableHtml = '<div class="table-responsive">' +
-                            '<table class="table table-bordered">' +
-                            '<thead>' +
-                            '<tr>' +
-                            '<th>Merek Barang</th>' +
-                            '<th>Kategori Barang</th>' +
-                            '<th>Nama Barang</th>' +
-                            '<th>Berat (gr)</th>' +
-                            '<th>Jumlah (dus)</th>' +
-                            '</tr>' +
-                            '</thead>' +
-                            '<tbody id="poTableBody">' +
-                            '<tr>' +
-                            '<td>' + escapeHtml(po.NAMA_MEREK) + '</td>' +
-                            '<td>' + escapeHtml(po.NAMA_KATEGORI) + '</td>' +
-                            '<td>' + escapeHtml(po.NAMA_BARANG) + '</td>' +
-                            '<td>' + numberFormat(po.BERAT) + '</td>' +
-                            '<td>' + numberFormat(po.JUMLAH_PESAN_BARANG_DUS) + '</td>' +
-                            '</tr>' +
-                            '</tbody>' +
-                            '</table>' +
-                            '</div>';
-                        
-                        // Cap DIBATALKAN
-                        var dibatalkanHtml = '';
-                        if (po.STATUS == 'DIBATALKAN') {
-                            dibatalkanHtml = '<div id="poDibatalkan" class="text-center mt-3">' +
-                                '<span class="badge bg-danger fs-6 p-3">DIBATALKAN</span>' +
-                                '</div>';
-                        }
-                        
-                        $('#poContent').html(headerHtml + kodePO + supplierField + tableHtml + dibatalkanHtml);
-                    } else {
-                        $('#poContent').html('<div class="alert alert-danger">' + escapeHtml(response.message) + '</div>');
-                    }
-                },
-                error: function() {
-                    $('#poContent').html('<div class="alert alert-danger">Terjadi kesalahan saat mengambil data PO!</div>');
-                }
-            });
         }
-        
-        function escapeHtml(text) {
-            var map = {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#039;'
-            };
-            return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
-        }
-        
-        function numberFormat(num) {
-            return num ? num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".") : '0';
-        }
-        
-        // Download PDF
-        $('#btnDownloadPO').on('click', function() {
-            if (currentPOId) {
-                window.open('download_po.php?id_pesan=' + encodeURIComponent(currentPOId), '_blank');
-            }
-        });
 
         function ubahStatus(idPesan, statusBaru) {
             var statusText = statusBaru == 'DIKIRIM' ? 'Dikirim' : 'Dibatalkan';

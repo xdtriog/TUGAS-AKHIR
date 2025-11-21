@@ -4,7 +4,7 @@ require_once '../dbconnect.php';
 require_once '../includes/uuid_generator.php';
 
 // Cek apakah user sudah login
-if (!isset($_SESSION['user_id']) || $_SESSION['permision'] != 1) {
+if (!isset($_SESSION['user_id']) || substr($_SESSION['user_id'], 0, 4) != 'OWNR') {
     header("Location: ../index.php");
     exit();
 }

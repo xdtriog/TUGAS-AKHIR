@@ -2,8 +2,8 @@
 session_start();
 require_once '../dbconnect.php';
 
-// Cek apakah user sudah login
-if (!isset($_SESSION['user_id']) || $_SESSION['permision'] != 1) {
+// Cek apakah user sudah login dan adalah pemilik (OWNR)
+if (!isset($_SESSION['user_id']) || substr($_SESSION['user_id'], 0, 4) != 'OWNR') {
     header("Location: ../index.php");
     exit();
 }
@@ -58,12 +58,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         $password = trim($_POST['password']);
         $status = 'AKTIF'; // Status selalu Aktif untuk user baru
         
-        // Tentukan permision berdasarkan role
-        $permision = 0;
-        if ($role == 'OWNER') {
-            $permision = 1;
-        }
-        
         if (!empty($role) && !empty($nama) && !empty($username) && !empty($password)) {
             // Validasi role dan lokasi
             if (($role == 'STAFF GUDANG' || $role == 'STAFF TOKO') && empty($kd_lokasi)) {
@@ -92,9 +86,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                         $check_stmt->close();
                         
                         // Insert data
-                        $insert_query = "INSERT INTO USERS (ID_USERS, KD_LOKASI, KD_SUPPLIER, NAMA, USERNAME, PASSWORD, STATUS, PERMISION) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                        $insert_query = "INSERT INTO USERS (ID_USERS, KD_LOKASI, KD_SUPPLIER, NAMA, USERNAME, PASSWORD, STATUS) VALUES (?, ?, ?, ?, ?, ?, ?)";
                         $insert_stmt = $conn->prepare($insert_query);
-                        $insert_stmt->bind_param("sssssssi", $id_user, $kd_lokasi, $kd_supplier, $nama, $username, $password, $status, $permision);
+                        $insert_stmt->bind_param("sssssss", $id_user, $kd_lokasi, $kd_supplier, $nama, $username, $password, $status);
                         
                         if ($insert_stmt->execute()) {
                             $message = 'User berhasil ditambahkan dengan ID: ' . $id_user;
@@ -187,7 +181,6 @@ $query_user = "SELECT
                     u.USERNAME,
                     u.PASSWORD,
                     u.STATUS,
-                    u.PERMISION,
                     u.KD_LOKASI,
                     u.KD_SUPPLIER
                  FROM USERS u

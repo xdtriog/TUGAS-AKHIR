@@ -5,9 +5,8 @@ require_once 'dbconnect.php';
 // Jika sudah login, redirect ke dashboard sesuai tipe user
 if (isset($_SESSION['user_id'])) {
     $id_users = $_SESSION['user_id'];
-    $permision = $_SESSION['permision'];
     
-    if ($permision == 1 || substr($id_users, 0, 4) == 'OWNR') {
+    if (substr($id_users, 0, 4) == 'OWNR') {
         header("Location: pemilik/dashboard.php");
         exit();
     } elseif (substr($id_users, 0, 4) == 'TOKO') {
@@ -28,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     
     if (!empty($username) && !empty($password)) {
         // Query untuk mencari user dengan status AKTIF
-        $stmt = $conn->prepare("SELECT ID_USERS, NAMA, USERNAME, PASSWORD, STATUS, PERMISION FROM USERS WHERE USERNAME = ?");
+        $stmt = $conn->prepare("SELECT ID_USERS, NAMA, USERNAME, PASSWORD, STATUS FROM USERS WHERE USERNAME = ?");
         $stmt->bind_param("s", $username);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -45,13 +44,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $_SESSION['user_id'] = $user['ID_USERS'];
                 $_SESSION['username'] = $user['USERNAME'];
                 $_SESSION['nama'] = $user['NAMA'];
-                $_SESSION['permision'] = $user['PERMISION'];
                 
-                // Redirect berdasarkan tipe user
+                // Redirect berdasarkan tipe user (cek dari ID_USERS)
                 $id_users = $user['ID_USERS'];
-                $permision = $user['PERMISION'];
                 
-                if ($permision == 1 || substr($id_users, 0, 4) == 'OWNR') {
+                if (substr($id_users, 0, 4) == 'OWNR') {
                     // Pemilik/Owner
                     header("Location: pemilik/dashboard.php");
                     exit();
