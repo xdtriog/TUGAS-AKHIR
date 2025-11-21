@@ -33,6 +33,15 @@ if ($result_user->num_rows == 0) {
 
 $user_data = $result_user->fetch_assoc();
 $kd_lokasi = $user_data['KD_LOKASI'];
+$nama_lokasi = $user_data['NAMA_LOKASI'] ?? 'Gudang';
+
+// Get alamat lokasi
+$query_alamat = "SELECT ALAMAT_LOKASI FROM MASTER_LOKASI WHERE KD_LOKASI = ?";
+$stmt_alamat = $conn->prepare($query_alamat);
+$stmt_alamat->bind_param("s", $kd_lokasi);
+$stmt_alamat->execute();
+$result_alamat = $stmt_alamat->get_result();
+$alamat_lokasi = $result_alamat->num_rows > 0 ? $result_alamat->fetch_assoc()['ALAMAT_LOKASI'] : '';
 
 // Handle AJAX request untuk get data pesan barang (untuk form validasi)
 if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_pesan_data'])) {
@@ -395,7 +404,10 @@ $active_page = 'barang_masuk';
     <div class="main-content">
         <!-- Page Header -->
         <div class="page-header">
-            <h1 class="page-title">Gudang - Barang Masuk</h1>
+            <h1 class="page-title">Gudang <?php echo htmlspecialchars($nama_lokasi); ?> - Barang Masuk</h1>
+            <?php if (!empty($alamat_lokasi)): ?>
+                <p class="text-muted mb-0"><?php echo htmlspecialchars($alamat_lokasi); ?></p>
+            <?php endif; ?>
         </div>
 
         <!-- Table Barang Masuk -->

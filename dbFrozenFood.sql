@@ -352,6 +352,13 @@ INSERT INTO `master_barang` (`KD_BARANG`, `KD_KATEGORI_BARANG`, `KD_SUPPLIER`, `
 ('W8r1LuGwd932W3Zq', 'N9YZGVmr', NULL, 'N6EKB1pQ', 'So Nice Sosis Ayam Keju', 50, NULL, NULL, 10, '2025-11-21 09:43:24', 'AKTIF');
 
 --
+-- Dumping data untuk tabel `users`
+--
+INSERT INTO `users` (`ID_USERS`, `KD_LOKASI`, `KD_SUPPLIER`, `NAMA`, `USERNAME`, `PASSWORD`, `STATUS`) VALUES
+('GDNGj825', 'NRb2W8VG', NULL, 'Yudi', 'gudang1', 'password', 'AKTIF'),
+('OWNR3f8x', NULL, NULL, 'Kevin', 'owner', 'password', 'AKTIF'),
+('TOKOeLig', 'NsHmYgfe', NULL, 'Hendro', 'toko1', 'password', 'AKTIF');
+
 --
 -- Dumping data untuk tabel `stock`
 --
@@ -362,12 +369,7 @@ INSERT INTO `stock` (`KD_BARANG`, `KD_LOKASI`, `UPDATED_BY`, `JUMLAH_BARANG`, `L
 ('W8r1LuGwd932W3Zq', 'NsHmYgfe', 'OWNR3f8x', 0, '2025-11-21 09:45:06', 10, 50, 'PIECES');
 
 --
--- Dumping data untuk tabel `users`
---
-INSERT INTO `users` (`ID_USERS`, `KD_LOKASI`, `KD_SUPPLIER`, `NAMA`, `USERNAME`, `PASSWORD`, `STATUS`) VALUES
-('GDNGj825', 'NRb2W8VG', NULL, 'Yudi', 'gudang1', 'password', 'AKTIF'),
-('OWNR3f8x', NULL, NULL, 'Kevin', 'owner', 'password', 'AKTIF'),
-('TOKOeLig', 'NsHmYgfe', NULL, 'Hendro', 'toko1', 'password', 'AKTIF');
+
 
 /* ============================================================= */
 /* DATABASE SIAP 100% – IMPORT LANGSUNG DI phpMyAdmin!          */

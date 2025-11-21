@@ -196,10 +196,10 @@ body.dashboard-body {
 }
 
 /* ============================================================= */
-/* PART 3: PEMILIK SPECIFIC STYLES                              */
+/* PART 3: GLOBAL DASHBOARD STYLES (Digunakan semua aktor)      */
 /* ============================================================= */
 
-/* 3.1. Sidebar (Pemilik) */
+/* 3.1. Sidebar (Global) */
 .sidebar {
     position: fixed;
     top: 0;
@@ -316,7 +316,7 @@ body.dashboard-body {
     font-weight: var(--font-weight-bold);
 }
 
-/* 3.2. Main Content (Pemilik) */
+/* 3.2. Main Content (Global) */
 .main-content {
     margin-left: 250px;
     min-height: 100vh;
@@ -344,7 +344,7 @@ body.sidebar-collapsed .main-content {
     margin: 0;
 }
 
-/* 3.3. Dashboard Cards (Pemilik) */
+/* 3.3. Dashboard Cards (Global) */
 .dashboard-container {
     background: var(--color-bg-secondary);
     min-height: 100vh;
@@ -415,7 +415,7 @@ body.sidebar-collapsed .main-content {
     color: var(--color-danger);
 }
 
-/* 3.4. Table Styles (Pemilik) */
+/* 3.4. Table Styles (Global) */
 .table-custom {
     border-radius: 8px;
     overflow: hidden;
@@ -483,7 +483,7 @@ body.sidebar-collapsed .main-content {
     margin-bottom: 3px;
 }
 
-/* 3.5. Search Bar (Pemilik) */
+/* 3.5. Search Bar (Global) */
 .search-container {
     background: var(--color-bg-secondary);
     padding: 20px;
@@ -522,7 +522,7 @@ body.sidebar-collapsed .main-content {
     pointer-events: none;
 }
 
-/* 3.6. Card Styles (Pemilik) */
+/* 3.6. Card Styles (Global) */
 .card-custom {
     border-radius: 10px;
     border: none;
@@ -544,7 +544,7 @@ body.sidebar-collapsed .main-content {
     font-weight: var(--font-weight-bold);
 }
 
-/* 3.7. DataTables Styles (Pemilik) */
+/* 3.7. DataTables Styles (Global) */
 .dataTables_wrapper {
     padding-top: 20px;
 }
@@ -632,22 +632,9 @@ body.sidebar-collapsed .main-content {
 }
 
 /* ============================================================= */
-/* PART 4: TOKO SPECIFIC STYLES (Untuk aktor Toko)              */
+/* PART 4: ADDITIONAL STYLES (Jika diperlukan di masa depan)     */
 /* ============================================================= */
-/* Styles khusus untuk aktor Toko bisa ditambahkan di sini */
-/* Contoh: .toko-sidebar { ... } */
-
-/* ============================================================= */
-/* PART 5: GUDANG SPECIFIC STYLES (Untuk aktor Gudang)          */
-/* ============================================================= */
-/* Styles khusus untuk aktor Gudang bisa ditambahkan di sini */
-/* Contoh: .gudang-sidebar { ... } */
-
-/* ============================================================= */
-/* PART 6: SUPPLIER SPECIFIC STYLES (Untuk aktor Supplier)      */
-/* ============================================================= */
-/* Styles khusus untuk aktor Supplier bisa ditambahkan di sini */
-/* Contoh: .supplier-sidebar { ... } */
+/* Styles tambahan bisa ditambahkan di sini jika diperlukan */
 
 /* ============================================================= */
 /* PART 7: RESPONSIVE STYLES (Global)                           */
@@ -704,7 +691,7 @@ body.sidebar-collapsed .main-content {
     }
 }
 
-/* 3.8. Modal Styles (Pemilik) */
+/* 3.8. Modal Styles (Global) */
 .modal-content {
     border-radius: 10px;
     border: none;

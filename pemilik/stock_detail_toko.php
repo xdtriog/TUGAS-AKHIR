@@ -808,12 +808,11 @@ $active_page = 'stock';
                 var satuanPerdus = parseInt($(this).data('satuan-perdus')) || 1;
                 
                 if ($(this).is(':checked')) {
-                    // Hitung jumlah dus yang membuat jumlah akhir (piece) di bawah stock max
-                    // Maksimal pieces yang bisa di-resupply = Stock Max - Stock Sekarang - 1
-                    // Atau lebih tepat: Stock Sekarang + Jumlah Resupply (piece) < Stock Max
-                    var maksimalPieces = stockMax - stockSekarang - 1;
+                    // Hitung jumlah dus yang membuat jumlah akhir (piece) sampai stock max (boleh sama dengan stock max, tidak boleh melebihi)
+                    // Maksimal pieces yang bisa di-resupply = Stock Max - Stock Sekarang
+                    var maksimalPieces = stockMax - stockSekarang;
                     
-                    // Jika maksimalPieces <= 0, berarti sudah melebihi atau sama dengan stock max
+                    // Jika maksimalPieces <= 0, berarti sudah mencapai atau melebihi stock max
                     if (maksimalPieces <= 0) {
                         // Tidak bisa resupply karena sudah mencapai atau melebihi stock max
                         $('.jumlah-resupply-dus[data-index="' + index + '"]').val(0);
@@ -830,6 +829,7 @@ $active_page = 'stock';
                     }
                     
                     // Hitung jumlah dus: floor(maksimalPieces / satuanPerdus)
+                    // Ini akan menghasilkan jumlah dus yang membuat stock akhir <= stock max
                     var jumlahDus = Math.floor(maksimalPieces / satuanPerdus);
                     
                     // Set nilai input
@@ -856,10 +856,10 @@ $active_page = 'stock';
             // Hitung stock akhir
             var stockAkhir = stockSekarang + jumlahPiece;
             
-            // Validasi: stock akhir tidak boleh melebihi stock max
-            if (stockMax > 0 && stockAkhir >= stockMax) {
+            // Validasi: stock akhir tidak boleh melebihi stock max (boleh sama dengan stock max)
+            if (stockMax > 0 && stockAkhir > stockMax) {
                 // Kurangi jumlah dus jika melebihi stock max
-                var maksimalPieces = stockMax - stockSekarang - 1;
+                var maksimalPieces = stockMax - stockSekarang;
                 if (maksimalPieces > 0) {
                     jumlahDus = Math.floor(maksimalPieces / satuanPerdus);
                     jumlahPiece = jumlahDus * satuanPerdus;
