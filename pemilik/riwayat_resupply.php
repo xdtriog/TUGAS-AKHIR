@@ -106,7 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
 $query_riwayat = "SELECT 
     dtb.ID_DETAIL_TRANSFER_BARANG,
     dtb.ID_TRANSFER_BARANG,
-    dtb.JUMLAH_MINTA_TRANSFER_DUS,
+    dtb.JUMLAH_PESAN_TRANSFER_DUS,
     dtb.JUMLAH_KIRIM_DUS,
     dtb.JUMLAH_DITOLAK_DUS,
     dtb.TOTAL_MASUK_DUS,
@@ -267,7 +267,7 @@ $active_page = 'stock';
                                     <td><?php echo isset($lokasi_map[$row['KD_LOKASI_ASAL']]) ? htmlspecialchars($lokasi_map[$row['KD_LOKASI_ASAL']]) : htmlspecialchars($row['KD_LOKASI_ASAL']); ?></td>
                                     <td><?php echo isset($lokasi_map[$row['KD_LOKASI_TUJUAN']]) ? htmlspecialchars($lokasi_map[$row['KD_LOKASI_TUJUAN']]) : htmlspecialchars($row['KD_LOKASI_TUJUAN']); ?></td>
                                     <td><?php echo formatWaktuStack($row['WAKTU_PESAN_TRANSFER'], $row['WAKTU_KIRIM_TRANSFER'], $row['WAKTU_SELESAI_TRANSFER'], $row['STATUS_DETAIL']); ?></td>
-                                    <td><?php echo number_format($row['JUMLAH_MINTA_TRANSFER_DUS'], 0, ',', '.'); ?></td>
+                                    <td><?php echo number_format($row['JUMLAH_PESAN_TRANSFER_DUS'], 0, ',', '.'); ?></td>
                                     <td><?php echo $row['TOTAL_MASUK_DUS'] ? number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['JUMLAH_KIRIM_DUS'] ? number_format($row['JUMLAH_KIRIM_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['JUMLAH_DITOLAK_DUS'] ? number_format($row['JUMLAH_DITOLAK_DUS'], 0, ',', '.') : '-'; ?></td>

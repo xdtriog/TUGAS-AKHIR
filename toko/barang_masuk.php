@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_transfer_data'])) {
         ml_asal.ALAMAT_LOKASI as ALAMAT_LOKASI_ASAL,
         dtb.ID_DETAIL_TRANSFER_BARANG,
         dtb.KD_BARANG,
-        dtb.JUMLAH_MINTA_TRANSFER_DUS,
+        dtb.JUMLAH_PESAN_TRANSFER_DUS,
         dtb.JUMLAH_KIRIM_DUS,
         mb.NAMA_BARANG,
         mb.BERAT,
@@ -118,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_transfer_data'])) {
             'nama_merek' => $row['NAMA_MEREK'],
             'nama_kategori' => $row['NAMA_KATEGORI'],
             'berat' => $row['BERAT'],
-            'jumlah_pesan_dus' => $row['JUMLAH_MINTA_TRANSFER_DUS'],
+            'jumlah_pesan_dus' => $row['JUMLAH_PESAN_TRANSFER_DUS'],
             'jumlah_kirim_dus' => $row['JUMLAH_KIRIM_DUS'],
             'satuan_perdus' => $row['SATUAN_PERDUS'] ?? 1,
             'stock_sekarang' => intval($row['STOCK_SEKARANG'] ?? 0),
@@ -298,7 +298,7 @@ $query_transfer = "SELECT
     ml_asal.KD_LOKASI as KD_LOKASI_ASAL,
     ml_asal.NAMA_LOKASI as NAMA_LOKASI_ASAL,
     ml_asal.ALAMAT_LOKASI as ALAMAT_LOKASI_ASAL,
-    COALESCE(SUM(dtb.JUMLAH_MINTA_TRANSFER_DUS), 0) as TOTAL_DIPESAN_DUS
+    COALESCE(SUM(dtb.JUMLAH_PESAN_TRANSFER_DUS), 0) as TOTAL_DIPESAN_DUS
 FROM TRANSFER_BARANG tb
 LEFT JOIN MASTER_LOKASI ml_asal ON tb.KD_LOKASI_ASAL = ml_asal.KD_LOKASI
 LEFT JOIN DETAIL_TRANSFER_BARANG dtb ON tb.ID_TRANSFER_BARANG = dtb.ID_TRANSFER_BARANG

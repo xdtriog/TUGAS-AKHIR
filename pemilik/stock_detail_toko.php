@@ -141,6 +141,7 @@ if (isset($_GET['get_resupply_data']) && $_GET['get_resupply_data'] == '1') {
     LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
     WHERE s.KD_BARANG IN ($placeholders) AND s.KD_LOKASI = ? AND mb.STATUS = 'AKTIF'
     ORDER BY mb.NAMA_BARANG ASC";
+    // Note: Filter STATUS = 'AKTIF' tetap diperlukan untuk resupply karena hanya barang aktif yang bisa di-resupply
     
     $stmt_resupply = $conn->prepare($query_resupply);
     $types = str_repeat('s', count($kd_barang_list)) . 's';
@@ -231,7 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             } while (checkUUIDExists($conn, 'DETAIL_TRANSFER_BARANG', 'ID_DETAIL_TRANSFER_BARANG', $id_detail));
             
             $insert_detail = "INSERT INTO DETAIL_TRANSFER_BARANG 
-                             (ID_DETAIL_TRANSFER_BARANG, ID_TRANSFER_BARANG, KD_BARANG, JUMLAH_MINTA_TRANSFER_DUS, STATUS)
+                             (ID_DETAIL_TRANSFER_BARANG, ID_TRANSFER_BARANG, KD_BARANG, JUMLAH_PESAN_TRANSFER_DUS, STATUS)
                              VALUES (?, ?, ?, ?, 'DIPESAN')";
             $stmt_detail = $conn->prepare($insert_detail);
             if (!$stmt_detail) {
@@ -261,6 +262,7 @@ $query_stock = "SELECT
     mb.NAMA_BARANG,
     mb.BERAT,
     mb.SATUAN_PERDUS,
+    mb.STATUS as STATUS_BARANG,
     COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
     COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
     s.JUMLAH_BARANG as STOCK_SEKARANG,
@@ -288,8 +290,8 @@ FROM STOCK s
 INNER JOIN MASTER_BARANG mb ON s.KD_BARANG = mb.KD_BARANG
 LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
 LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
-WHERE s.KD_LOKASI = ? AND mb.STATUS = 'AKTIF'
-ORDER BY PRIORITAS ASC, mb.NAMA_BARANG ASC";
+WHERE s.KD_LOKASI = ?
+ORDER BY s.JUMLAH_BARANG ASC";
 
 $stmt_stock = $conn->prepare($query_stock);
 if ($stmt_stock === false) {
@@ -383,6 +385,7 @@ $active_page = 'stock';
                             <th>Satuan</th>
                             <th>Terakhir Resupply</th>
                             <th>Terakhir Update</th>
+                            <th>Status</th>
                             <th>Action</th>
                             <th style="display: none;">PRIORITAS</th>
                         </tr>
@@ -392,7 +395,11 @@ $active_page = 'stock';
                             <?php while ($row = $result_stock->fetch_assoc()): ?>
                                 <tr>
                                     <td>
-                                        <input type="checkbox" class="row-checkbox" value="<?php echo htmlspecialchars($row['KD_BARANG']); ?>">
+                                        <?php if ($row['STATUS_BARANG'] == 'AKTIF'): ?>
+                                            <input type="checkbox" class="row-checkbox" value="<?php echo htmlspecialchars($row['KD_BARANG']); ?>">
+                                        <?php else: ?>
+                                            <input type="checkbox" class="row-checkbox" value="<?php echo htmlspecialchars($row['KD_BARANG']); ?>" disabled style="opacity: 0.5;">
+                                        <?php endif; ?>
                                     </td>
                                     <td><?php echo htmlspecialchars($row['KD_BARANG']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
@@ -405,6 +412,13 @@ $active_page = 'stock';
                                     <td><?php echo htmlspecialchars($row['SATUAN']); ?></td>
                                     <td><?php echo formatTanggalWaktu($row['TERAKHIR_RESUPPLY']); ?></td>
                                     <td><?php echo formatTanggalWaktu($row['LAST_UPDATED']); ?></td>
+                                    <td>
+                                        <?php if ($row['STATUS_BARANG'] == 'AKTIF'): ?>
+                                            <span class="badge bg-success">Aktif</span>
+                                        <?php else: ?>
+                                            <span class="badge bg-secondary">Tidak Aktif</span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td>
                                         <button class="btn-view btn-sm" onclick="riwayatResupply('<?php echo htmlspecialchars($row['KD_BARANG']); ?>')">Riwayat Resupply</button>
                                     </td>
@@ -437,6 +451,8 @@ $active_page = 'stock';
                                     // Reset result pointer
                                     $result_stock->data_seek(0);
                                     while ($row = $result_stock->fetch_assoc()):
+                                        // Hanya tampilkan barang aktif di dropdown
+                                        if ($row['STATUS_BARANG'] == 'AKTIF'):
                                 ?>
                                     <option value="<?php echo htmlspecialchars($row['KD_BARANG']); ?>">
                                         <?php 
@@ -445,6 +461,7 @@ $active_page = 'stock';
                                         ?>
                                     </option>
                                 <?php
+                                        endif;
                                     endwhile;
                                 }
                                 ?>
@@ -536,10 +553,10 @@ $active_page = 'stock';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[13, 'asc'], [4, 'asc']], // Sort by PRIORITAS (hidden column), then Nama Barang
+                order: [[14, 'asc'], [4, 'asc']], // Sort by PRIORITAS (hidden column), then Nama Barang
                 columnDefs: [
-                    { orderable: false, targets: [0, 12] }, // Disable sorting on checkbox and Action column
-                    { visible: false, targets: 13 } // Hide PRIORITAS column
+                    { orderable: false, targets: [0, 13] }, // Disable sorting on checkbox and Action column
+                    { visible: false, targets: 14 } // Hide PRIORITAS column
                 ],
                 scrollX: true,
                 autoWidth: false,

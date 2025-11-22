@@ -62,6 +62,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_pesan_data'])) {
         pb.TOTAL_MASUK_DUS,
         pb.JUMLAH_DITOLAK_DUS,
         pb.TGL_EXPIRED,
+        pb.HARGA_PESAN_BARANG_DUS,
+        pb.BIAYA_PENGIRIMAAN,
         mb.NAMA_BARANG,
         mb.BERAT,
         COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
@@ -125,6 +127,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_pesan_data'])) {
             'jumlah_dipesan' => $pesan_data['JUMLAH_PESAN_BARANG_DUS'],
             'jumlah_dikirim' => $pesan_data['TOTAL_MASUK_DUS'] ?? $pesan_data['JUMLAH_PESAN_BARANG_DUS'],
             'jumlah_ditolak' => $pesan_data['JUMLAH_DITOLAK_DUS'] ?? 0,
+            'harga_pesan_dus' => $pesan_data['HARGA_PESAN_BARANG_DUS'] ?? 0,
+            'biaya_pengiriman' => $pesan_data['BIAYA_PENGIRIMAAN'] ?? 0,
             'tgl_expired' => $tgl_expired
         ]
     ]);
@@ -139,9 +143,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     $jumlah_dikirim = isset($_POST['jumlah_dikirim']) ? (int)$_POST['jumlah_dikirim'] : 0;
     $jumlah_ditolak = isset($_POST['jumlah_ditolak']) ? (int)$_POST['jumlah_ditolak'] : 0;
     $total_masuk = isset($_POST['total_masuk']) ? (int)$_POST['total_masuk'] : 0;
+    $harga_pesan_dus = isset($_POST['harga_pesan_dus']) ? floatval($_POST['harga_pesan_dus']) : 0;
+    $biaya_pengiriman = isset($_POST['biaya_pengiriman']) ? floatval($_POST['biaya_pengiriman']) : 0;
     $tgl_expired = isset($_POST['tgl_expired']) ? trim($_POST['tgl_expired']) : null;
     
-    if (empty($id_pesan) || $jumlah_dikirim < 0 || $jumlah_ditolak < 0 || $total_masuk < 0) {
+    if (empty($id_pesan) || $jumlah_dikirim < 0 || $jumlah_ditolak < 0 || $total_masuk < 0 || $harga_pesan_dus < 0 || $biaya_pengiriman < 0) {
         echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
         exit();
     }
@@ -177,32 +183,36 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         $pesan_data = $result_pesan->fetch_assoc();
         $kd_barang = $pesan_data['KD_BARANG'];
         
-        // Update status PESAN_BARANG menjadi SELESAI dan set WAKTU_SAMPAI
+        // Update status PESAN_BARANG menjadi SELESAI dan set WAKTU_SAMPAI, HARGA_PESAN_BARANG_DUS, dan BIAYA_PENGIRIMAAN
         if (!empty($tgl_expired)) {
             $update_pesan = "UPDATE PESAN_BARANG 
                             SET STATUS = 'SELESAI', 
                                 WAKTU_SAMPAI = CURRENT_TIMESTAMP,
                                 TOTAL_MASUK_DUS = ?,
                                 JUMLAH_DITOLAK_DUS = ?,
+                                HARGA_PESAN_BARANG_DUS = ?,
+                                BIAYA_PENGIRIMAAN = ?,
                                 TGL_EXPIRED = ?
                             WHERE ID_PESAN_BARANG = ?";
             $stmt_update = $conn->prepare($update_pesan);
             if (!$stmt_update) {
                 throw new Exception('Gagal prepare query update pesan barang: ' . $conn->error);
             }
-            $stmt_update->bind_param("iiss", $total_masuk, $jumlah_ditolak, $tgl_expired, $id_pesan);
+            $stmt_update->bind_param("iiddss", $total_masuk, $jumlah_ditolak, $harga_pesan_dus, $biaya_pengiriman, $tgl_expired, $id_pesan);
         } else {
             $update_pesan = "UPDATE PESAN_BARANG 
                             SET STATUS = 'SELESAI', 
                                 WAKTU_SAMPAI = CURRENT_TIMESTAMP,
                                 TOTAL_MASUK_DUS = ?,
-                                JUMLAH_DITOLAK_DUS = ?
+                                JUMLAH_DITOLAK_DUS = ?,
+                                HARGA_PESAN_BARANG_DUS = ?,
+                                BIAYA_PENGIRIMAAN = ?
                             WHERE ID_PESAN_BARANG = ?";
             $stmt_update = $conn->prepare($update_pesan);
             if (!$stmt_update) {
                 throw new Exception('Gagal prepare query update pesan barang: ' . $conn->error);
             }
-            $stmt_update->bind_param("iis", $total_masuk, $jumlah_ditolak, $id_pesan);
+            $stmt_update->bind_param("iidds", $total_masuk, $jumlah_ditolak, $harga_pesan_dus, $biaya_pengiriman, $id_pesan);
         }
         if (!$stmt_update->execute()) {
             throw new Exception('Gagal mengupdate data pesan barang: ' . $stmt_update->error);
@@ -253,6 +263,46 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal, $total_masuk, $jumlah_akhir, $id_pesan, $satuan);
             if (!$stmt_history->execute()) {
                 throw new Exception('Gagal insert history: ' . $stmt_history->error);
+            }
+        }
+        
+        // Update AVG_HARGA_BELI di MASTER_BARANG
+        // Hitung weighted average dari semua pembelian yang sudah selesai
+        if ($harga_pesan_dus > 0 && $total_masuk > 0) {
+            $query_avg = "SELECT 
+                COALESCE(SUM(pb.HARGA_PESAN_BARANG_DUS * pb.TOTAL_MASUK_DUS), 0) as total_harga_quantity,
+                COALESCE(SUM(pb.TOTAL_MASUK_DUS), 0) as total_quantity
+            FROM PESAN_BARANG pb
+            WHERE pb.KD_BARANG = ? AND pb.STATUS = 'SELESAI' AND pb.TOTAL_MASUK_DUS > 0";
+            $stmt_avg = $conn->prepare($query_avg);
+            if (!$stmt_avg) {
+                throw new Exception('Gagal prepare query avg harga: ' . $conn->error);
+            }
+            $stmt_avg->bind_param("s", $kd_barang);
+            if (!$stmt_avg->execute()) {
+                throw new Exception('Gagal execute query avg harga: ' . $stmt_avg->error);
+            }
+            $result_avg = $stmt_avg->get_result();
+            
+            if ($result_avg->num_rows > 0) {
+                $avg_data = $result_avg->fetch_assoc();
+                $total_harga_quantity = $avg_data['total_harga_quantity'];
+                $total_quantity = $avg_data['total_quantity'];
+                
+                if ($total_quantity > 0) {
+                    $avg_harga_beli = $total_harga_quantity / $total_quantity;
+                    
+                    // Update AVG_HARGA_BELI di MASTER_BARANG
+                    $update_avg = "UPDATE MASTER_BARANG SET AVG_HARGA_BELI = ? WHERE KD_BARANG = ?";
+                    $stmt_update_avg = $conn->prepare($update_avg);
+                    if (!$stmt_update_avg) {
+                        throw new Exception('Gagal prepare query update avg harga: ' . $conn->error);
+                    }
+                    $stmt_update_avg->bind_param("ds", $avg_harga_beli, $kd_barang);
+                    if (!$stmt_update_avg->execute()) {
+                        throw new Exception('Gagal mengupdate AVG_HARGA_BELI: ' . $stmt_update_avg->error);
+                    }
+                }
             }
         }
         
@@ -552,6 +602,14 @@ $active_page = 'barang_masuk';
                                 <input type="number" class="form-control form-control-sm" id="validasi_jumlah_ditolak" name="jumlah_ditolak" min="0" required>
                             </div>
                             <div class="col-md-4">
+                                <label class="form-label fw-bold small">Harga Barang (dus) <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control form-control-sm" id="validasi_harga_pesan" name="harga_pesan_dus" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold small">Biaya Pengiriman <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control form-control-sm" id="validasi_biaya_pengiriman" name="biaya_pengiriman" required>
+                            </div>
+                            <div class="col-md-4">
                                 <label class="form-label fw-bold small">Tanggal Expired</label>
                                 <input type="date" class="form-control form-control-sm" id="validasi_tgl_expired" name="tgl_expired">
                             </div>
@@ -638,6 +696,9 @@ $active_page = 'barang_masuk';
                         $('#validasi_jumlah_dipesan').val(data.jumlah_dipesan.toLocaleString('id-ID'));
                         $('#validasi_jumlah_dikirim').val(data.jumlah_dikirim);
                         $('#validasi_jumlah_ditolak').val(data.jumlah_ditolak);
+                        // Format rupiah untuk harga dan biaya pengiriman
+                        $('#validasi_harga_pesan').val(formatRupiah(data.harga_pesan_dus || 0));
+                        $('#validasi_biaya_pengiriman').val(formatRupiah(data.biaya_pengiriman || 0));
                         $('#validasi_tgl_expired').val(data.tgl_expired);
                         
                         // Hitung total masuk
@@ -681,6 +742,60 @@ $active_page = 'barang_masuk';
         // Event listener untuk hitung otomatis
         $(document).on('input', '#validasi_jumlah_dikirim, #validasi_jumlah_ditolak', function() {
             hitungTotalMasuk();
+        });
+        
+        // Format rupiah untuk input harga dan biaya pengiriman
+        function formatRupiah(angka) {
+            if (!angka && angka !== 0) return '';
+            
+            // Konversi ke string dan hapus semua karakter non-digit kecuali titik dan koma
+            var number_string = angka.toString().replace(/[^\d.,]/g, '');
+            
+            // Pisahkan bagian integer dan desimal
+            var parts = number_string.split(/[.,]/);
+            var integerPart = parts[0] || '0';
+            var decimalPart = parts[1] || '';
+            
+            // Format integer dengan titik sebagai pemisah ribuan
+            var formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            
+            // Gabungkan dengan desimal jika ada
+            var result = formattedInteger;
+            if (decimalPart) {
+                result += ',' + decimalPart;
+            }
+            
+            return 'Rp ' + result;
+        }
+        
+        function unformatRupiah(rupiah) {
+            if (!rupiah) return 0;
+            // Hapus "Rp " dan spasi, ganti titik (ribuan) dengan kosong, ganti koma (desimal) dengan titik
+            var cleaned = rupiah.toString().replace(/Rp\s?/g, '').replace(/\./g, '').replace(',', '.');
+            return parseFloat(cleaned) || 0;
+        }
+        
+        // Event listener untuk format rupiah saat input
+        $(document).on('input', '#validasi_harga_pesan, #validasi_biaya_pengiriman', function() {
+            var value = $(this).val();
+            // Simpan posisi cursor
+            var cursorPosition = this.selectionStart;
+            var originalLength = value.length;
+            
+            // Unformat dan format ulang
+            var unformatted = unformatRupiah(value);
+            var formatted = formatRupiah(unformatted);
+            
+            // Set nilai yang sudah diformat
+            $(this).val(formatted);
+            
+            // Perbaiki posisi cursor setelah format
+            var newLength = formatted.length;
+            var lengthDiff = newLength - originalLength;
+            var newCursorPosition = cursorPosition + lengthDiff;
+            
+            // Set cursor position
+            this.setSelectionRange(newCursorPosition, newCursorPosition);
         });
 
         function simpanValidasi() {
@@ -729,6 +844,20 @@ $active_page = 'barang_masuk';
                 return;
             }
 
+            // Ambil harga dan biaya pengiriman (hapus format rupiah)
+            var hargaPesanDus = unformatRupiah($('#validasi_harga_pesan').val()) || 0;
+            var biayaPengiriman = unformatRupiah($('#validasi_biaya_pengiriman').val()) || 0;
+            
+            if (hargaPesanDus < 0 || biayaPengiriman < 0) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error Validasi!',
+                    text: 'Harga barang dan biaya pengiriman tidak boleh negatif!',
+                    confirmButtonColor: '#e74c3c'
+                });
+                return;
+            }
+
             // AJAX request untuk validasi
             $.ajax({
                 url: 'barang_masuk.php',
@@ -739,6 +868,8 @@ $active_page = 'barang_masuk';
                     jumlah_dikirim: jumlahDikirim,
                     jumlah_ditolak: jumlahDitolak,
                     total_masuk: totalMasuk,
+                    harga_pesan_dus: hargaPesanDus,
+                    biaya_pengiriman: biayaPengiriman,
                     tgl_expired: $('#validasi_tgl_expired').val() || ''
                 },
                 dataType: 'json',

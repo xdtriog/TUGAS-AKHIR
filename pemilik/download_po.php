@@ -213,13 +213,34 @@ function formatRupiah($angka) {
     
     <div class="print-container">
         <div class="header">
+            <h2>PURCHASE ORDER</h2>
             <h2>CV. KHARISMA WIJAYA ABADI KUSUMA</h2>
             <p>JL. Rembang - 0813653985</p>
         </div>
         
         <div class="info-section">
-            <label>Kode PO:</label>
+            <label>ID PO:</label>
             <input type="text" value="<?php echo htmlspecialchars($po['ID_PESAN_BARANG']); ?>" readonly>
+        </div>
+        
+        <?php 
+        // Format waktu dibuat
+        $waktu_dibuat = '';
+        if (!empty($po['WAKTU_PESAN'])) {
+            $bulan = [
+                1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
+                5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
+                9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
+            ];
+            $date_pesan = new DateTime($po['WAKTU_PESAN']);
+            $tanggal_pesan = $date_pesan->format('d') . ' ' . $bulan[(int)$date_pesan->format('m')] . ' ' . $date_pesan->format('Y');
+            $waktu_pesan = $date_pesan->format('H:i') . ' WIB';
+            $waktu_dibuat = $tanggal_pesan . ' ' . $waktu_pesan;
+        }
+        ?>
+        <div class="info-section">
+            <label>Waktu dibuat:</label>
+            <input type="text" value="<?php echo htmlspecialchars($waktu_dibuat); ?>" readonly>
         </div>
         
         <div class="info-section">

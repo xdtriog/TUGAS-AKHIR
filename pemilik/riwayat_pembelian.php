@@ -52,17 +52,18 @@ if (empty($kd_barang)) {
     exit();
 }
 
-// Query untuk mendapatkan data barang
+// Query untuk mendapatkan data barang (tidak filter status agar bisa lihat riwayat barang tidak aktif)
 $query_barang = "SELECT 
     mb.KD_BARANG,
     mb.NAMA_BARANG,
     mb.BERAT,
+    mb.STATUS as STATUS_BARANG,
     COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
     COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI
 FROM MASTER_BARANG mb
 LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
 LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
-WHERE mb.KD_BARANG = ? AND mb.STATUS = 'AKTIF'";
+WHERE mb.KD_BARANG = ?";
 $stmt_barang = $conn->prepare($query_barang);
 $stmt_barang->bind_param("s", $kd_barang);
 $stmt_barang->execute();
@@ -96,6 +97,7 @@ $query_riwayat = "SELECT
     pb.KD_SUPPLIER,
     pb.JUMLAH_PESAN_BARANG_DUS,
     pb.HARGA_PESAN_BARANG_DUS,
+    pb.BIAYA_PENGIRIMAAN,
     pb.TOTAL_MASUK_DUS,
     pb.JUMLAH_DITOLAK_DUS,
     pb.WAKTU_PESAN,
@@ -261,11 +263,12 @@ $active_page = 'stock';
                             <th>Supplier</th>
                             <th>Waktu</th>
                             <th>Jumlah Pemesanan</th>
-                            <th>Satuan</th>
                             <th>Total Masuk</th>
                             <th>Jumlah Ditolak</th>
+                            <th>Satuan</th>
                             <th>Harga Beli</th>
                             <th>Total Bayar</th>
+                            <th>Biaya Pengiriman</th>
                             <th>Status</th>
                             <th>Action</th>
                         </tr>
@@ -291,9 +294,9 @@ $active_page = 'stock';
                                     </td>
                                     <td><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_ESTIMASI_SAMPAI'], $row['WAKTU_SAMPAI'], $row['STATUS']); ?></td>
                                     <td><?php echo $row['JUMLAH_PESAN_BARANG_DUS'] ? number_format($row['JUMLAH_PESAN_BARANG_DUS'], 0, ',', '.') : '-'; ?></td>
-                                    <td><?php echo htmlspecialchars($row['SATUAN'] ?? 'Dus'); ?></td>
                                     <td><?php echo $row['TOTAL_MASUK_DUS'] ? number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['JUMLAH_DITOLAK_DUS'] ? number_format($row['JUMLAH_DITOLAK_DUS'], 0, ',', '.') : '-'; ?></td>
+                                    <td><?php echo htmlspecialchars($row['SATUAN'] ?? 'Dus'); ?></td>
                                     <td><?php echo formatRupiah($row['HARGA_PESAN_BARANG_DUS']); ?></td>
                                     <td><?php 
                                         $total_bayar = 0;
@@ -302,6 +305,7 @@ $active_page = 'stock';
                                         }
                                         echo formatRupiah($total_bayar);
                                     ?></td>
+                                    <td><?php echo formatRupiah($row['BIAYA_PENGIRIMAAN']); ?></td>
                                     <td>
                                         <?php 
                                         $status_text = '';
@@ -392,7 +396,7 @@ $active_page = 'stock';
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
                 order: [[2, 'desc']], // Sort by Waktu descending
                 columnDefs: [
-                    { orderable: false, targets: 10 } // Disable sorting on Action column
+                    { orderable: false, targets: 11 } // Disable sorting on Action column
                 ],
                 scrollX: true,
                 responsive: true,

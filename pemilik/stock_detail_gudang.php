@@ -179,6 +179,7 @@ $query_stock = "SELECT
     s.KD_BARANG,
     mb.NAMA_BARANG,
     mb.BERAT,
+    mb.STATUS as STATUS_BARANG,
     COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
     COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
     s.JUMLAH_BARANG as STOCK_SEKARANG,
@@ -193,7 +194,12 @@ $query_stock = "SELECT
     COALESCE(
         DATE_FORMAT(poq.WAKTU_POQ, '%Y-%m-%d %H:%i:%s'),
         NULL
-    ) as WAKTU_TERAKHIR_POQ
+    ) as WAKTU_TERAKHIR_POQ,
+    CASE 
+        WHEN COALESCE(DATE_ADD(poq.WAKTU_POQ, INTERVAL poq.INTERVAL_HARI DAY), '9999-12-31') <= CURDATE() THEN 1
+        WHEN COALESCE(DATE_ADD(poq.WAKTU_POQ, INTERVAL poq.INTERVAL_HARI DAY), '9999-12-31') <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 2
+        ELSE 3
+    END as PRIORITAS_JATUH_TEMPO
 FROM STOCK s
 INNER JOIN MASTER_BARANG mb ON s.KD_BARANG = mb.KD_BARANG
 LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
@@ -215,8 +221,11 @@ LEFT JOIN (
         AND poq1.KD_LOKASI = poq2.KD_LOKASI 
         AND poq1.WAKTU_POQ = poq2.MAX_WAKTU
 ) poq ON s.KD_BARANG = poq.KD_BARANG AND s.KD_LOKASI = poq.KD_LOKASI
-WHERE s.KD_LOKASI = ? AND mb.STATUS = 'AKTIF'
-ORDER BY mb.NAMA_BARANG ASC";
+WHERE s.KD_LOKASI = ?
+ORDER BY 
+    PRIORITAS_JATUH_TEMPO ASC,
+    COALESCE(DATE_ADD(poq.WAKTU_POQ, INTERVAL poq.INTERVAL_HARI DAY), '9999-12-31') ASC,
+    s.JUMLAH_BARANG ASC";
 
 $stmt_stock = $conn->prepare($query_stock);
 if ($stmt_stock === false) {
@@ -317,6 +326,7 @@ $active_page = 'stock';
                             <th>Jatuh Tempo POQ</th>
                             <th>Waktu Terakhir POQ</th>
                             <th>Terakhir Update</th>
+                            <th>Status</th>
                             <th>Action</th>
                         </tr>
                     </thead>
@@ -336,10 +346,19 @@ $active_page = 'stock';
                                     <td><?php echo formatTanggal($row['WAKTU_TERAKHIR_POQ']); ?></td>
                                     <td><?php echo formatTanggalWaktu($row['LAST_UPDATED']); ?></td>
                                     <td>
+                                        <?php if ($row['STATUS_BARANG'] == 'AKTIF'): ?>
+                                            <span class="badge bg-success">Aktif</span>
+                                        <?php else: ?>
+                                            <span class="badge bg-secondary">Tidak Aktif</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
                                         <div class="d-flex flex-column gap-1">
                                             <button class="btn-view btn-sm" onclick="lihatRiwayatPembelian('<?php echo htmlspecialchars($row['KD_BARANG']); ?>')">Lihat Riwayat Pembelian</button>
-                                            <button class="btn-view btn-sm" onclick="hitungPOQ('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Hitung POQ</button>
-                                            <button class="btn-view btn-sm" onclick="pesanManual('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Pesan Manual</button>
+                                            <?php if ($row['STATUS_BARANG'] == 'AKTIF'): ?>
+                                                <button class="btn-view btn-sm" onclick="hitungPOQ('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Hitung POQ</button>
+                                                <button class="btn-view btn-sm" onclick="pesanManual('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Pesan Manual</button>
+                                            <?php endif; ?>
                                         </div>
                                     </td>
                                 </tr>
@@ -373,13 +392,18 @@ $active_page = 'stock';
                                 $result_stock->data_seek(0);
                                 if ($result_stock->num_rows > 0): ?>
                                     <?php while ($row = $result_stock->fetch_assoc()): ?>
-                                        <option value="<?php echo htmlspecialchars($row['KD_BARANG']); ?>" 
-                                                data-max-stock="<?php echo $row['JUMLAH_MAX_STOCK']; ?>">
-                                            <?php 
-                                            $display_text = $row['KD_BARANG'] . '-' . $row['NAMA_MEREK'] . '-' . $row['NAMA_KATEGORI'] . '-' . $row['NAMA_BARANG'] . '-' . number_format($row['BERAT'], 0, ',', '.');
-                                            echo htmlspecialchars($display_text);
-                                            ?>
-                                        </option>
+                                        <?php 
+                                        // Hanya tampilkan barang aktif di dropdown setting stock
+                                        if ($row['STATUS_BARANG'] == 'AKTIF'): 
+                                        ?>
+                                            <option value="<?php echo htmlspecialchars($row['KD_BARANG']); ?>" 
+                                                    data-max-stock="<?php echo $row['JUMLAH_MAX_STOCK']; ?>">
+                                                <?php 
+                                                $display_text = $row['KD_BARANG'] . '-' . $row['NAMA_MEREK'] . '-' . $row['NAMA_KATEGORI'] . '-' . $row['NAMA_BARANG'] . '-' . number_format($row['BERAT'], 0, ',', '.');
+                                                echo htmlspecialchars($display_text);
+                                                ?>
+                                            </option>
+                                        <?php endif; ?>
                                     <?php endwhile; ?>
                                 <?php endif; ?>
                             </select>
@@ -511,7 +535,7 @@ $active_page = 'stock';
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
                 order: [[3, 'asc']], // Sort by Nama Barang
                 columnDefs: [
-                    { orderable: false, targets: 11 } // Disable sorting on Action column
+                    { orderable: false, targets: 12 } // Disable sorting on Action column
                 ],
                 scrollX: true, // Enable horizontal scrolling
                 responsive: true,
@@ -639,7 +663,18 @@ $active_page = 'stock';
 
         function lihatRiwayatPembelian(kdBarang) {
             // Redirect ke halaman riwayat pembelian
-            window.location.href = 'riwayat_pembelian.php?kd_barang=' + encodeURIComponent(kdBarang);
+            if (!kdBarang || kdBarang.trim() === '') {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error!',
+                    text: 'Kode barang tidak valid!',
+                    confirmButtonColor: '#e74c3c'
+                });
+                return;
+            }
+            // Gunakan path relatif dari folder pemilik
+            var url = 'riwayat_pembelian.php?kd_barang=' + encodeURIComponent(kdBarang);
+            window.location.href = url;
         }
 
         function hitungPOQ(kdBarang, kdLokasi) {

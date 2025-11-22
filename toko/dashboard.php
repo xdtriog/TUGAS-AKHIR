@@ -57,8 +57,8 @@ $query_stock = "SELECT
                 INNER JOIN MASTER_BARANG mb ON s.KD_BARANG = mb.KD_BARANG
                 LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
                 LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
-                WHERE s.KD_LOKASI = ? AND mb.STATUS = 'AKTIF'
-                ORDER BY mb.NAMA_BARANG ASC";
+                WHERE s.KD_LOKASI = ?
+                ORDER BY s.JUMLAH_BARANG ASC";
 $stmt_stock = $conn->prepare($query_stock);
 $stmt_stock->bind_param("s", $kd_lokasi);
 $stmt_stock->execute();
@@ -172,7 +172,7 @@ $active_page = 'dashboard';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[0, 'asc']], // Sort by Kode Barang ascending
+                order: [[5, 'asc']], // Sort by Stock Sekarang (index 5) - tersedikit ke terbanyak
                 scrollX: true,
                 autoWidth: false
             }).on('error.dt', function(e, settings, techNote, message) {

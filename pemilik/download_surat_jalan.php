@@ -28,7 +28,7 @@ $query_surat_jalan = "SELECT
     tb.WAKTU_PESAN_TRANSFER,
     dtb.ID_DETAIL_TRANSFER_BARANG,
     dtb.KD_BARANG,
-    dtb.JUMLAH_MINTA_TRANSFER_DUS,
+    dtb.JUMLAH_PESAN_TRANSFER_DUS,
     dtb.JUMLAH_KIRIM_DUS,
     dtb.STATUS as STATUS_DETAIL,
     tb.KD_LOKASI_ASAL,
@@ -341,7 +341,7 @@ while ($row = $result_surat->fetch_assoc()) {
                         <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
                         <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
                         <td><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
-                        <td><?php echo number_format($row['JUMLAH_MINTA_TRANSFER_DUS'], 0, ',', '.'); ?></td>
+                        <td><?php echo number_format($row['JUMLAH_PESAN_TRANSFER_DUS'], 0, ',', '.'); ?></td>
                         <td>
                             <?php if ($is_cancelled): ?>
                                 <span class="status-badge dibatalkan">Dibatalkan</span>

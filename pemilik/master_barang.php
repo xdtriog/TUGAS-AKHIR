@@ -9,6 +9,59 @@ if (!isset($_SESSION['user_id']) || substr($_SESSION['user_id'], 0, 4) != 'OWNR'
     exit();
 }
 
+// Handle AJAX request untuk get data barang (untuk form edit)
+if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
+    header('Content-Type: application/json');
+    
+    $kd_barang = isset($_GET['kd_barang']) ? trim($_GET['kd_barang']) : '';
+    
+    if (empty($kd_barang)) {
+        echo json_encode(['success' => false, 'message' => 'Kode barang tidak valid!']);
+        exit();
+    }
+    
+    // Query untuk mendapatkan data barang
+    $query_barang_edit = "SELECT 
+        mb.KD_BARANG,
+        mb.KD_MEREK_BARANG,
+        mb.KD_KATEGORI_BARANG,
+        mb.NAMA_BARANG,
+        mb.BERAT,
+        mb.SATUAN_PERDUS,
+        mb.AVG_HARGA_BELI,
+        mb.HARGA_JUAL_BARANG,
+        mb.STATUS
+    FROM MASTER_BARANG mb
+    WHERE mb.KD_BARANG = ?";
+    $stmt_barang_edit = $conn->prepare($query_barang_edit);
+    $stmt_barang_edit->bind_param("s", $kd_barang);
+    $stmt_barang_edit->execute();
+    $result_barang_edit = $stmt_barang_edit->get_result();
+    
+    if ($result_barang_edit->num_rows == 0) {
+        echo json_encode(['success' => false, 'message' => 'Data barang tidak ditemukan!']);
+        exit();
+    }
+    
+    $barang_data = $result_barang_edit->fetch_assoc();
+    
+    echo json_encode([
+        'success' => true,
+        'data' => [
+            'kd_barang' => $barang_data['KD_BARANG'],
+            'kd_merek' => $barang_data['KD_MEREK_BARANG'] ?? '',
+            'kd_kategori' => $barang_data['KD_KATEGORI_BARANG'] ?? '',
+            'nama_barang' => $barang_data['NAMA_BARANG'],
+            'berat' => $barang_data['BERAT'] ?? 0,
+            'satuan_perdus' => $barang_data['SATUAN_PERDUS'],
+            'avg_harga_beli' => $barang_data['AVG_HARGA_BELI'] ?? 0,
+            'harga_jual' => $barang_data['HARGA_JUAL_BARANG'] ?? 0,
+            'status' => $barang_data['STATUS']
+        ]
+    ]);
+    exit();
+}
+
 // Handle form submission untuk tambah barang
 $message = '';
 $message_type = '';
@@ -243,7 +296,7 @@ $active_page = 'master_barang';
                                         </span>
                                     </td>
                                     <td>
-                                        <button class="btn-view" onclick="editBarang('<?php echo htmlspecialchars($row['KD_BARANG'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['KD_MEREK_BARANG'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['KD_KATEGORI_BARANG'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['NAMA_BARANG'], ENT_QUOTES); ?>', <?php echo $row['BERAT']; ?>, <?php echo $row['SATUAN_PERDUS']; ?>, <?php echo $row['AVG_HARGA_BELI']; ?>, <?php echo $row['HARGA_JUAL_BARANG']; ?>, '<?php echo htmlspecialchars($row['STATUS'], ENT_QUOTES); ?>')">Edit</button>
+                                        <button class="btn-view" onclick="openEditModal('<?php echo htmlspecialchars($row['KD_BARANG'], ENT_QUOTES); ?>')">Edit</button>
                                     </td>
                                 </tr>
                             <?php endwhile; ?>
@@ -421,7 +474,7 @@ $active_page = 'master_barang';
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label for="edit_avg_harga_beli" class="form-label">AVG Harga Beli</label>
-                                    <input type="number" class="form-control form-control-sm" id="edit_avg_harga_beli" placeholder="0" min="0" step="0.01" readonly style="background-color: #e9ecef;" disabled>
+                                    <input type="text" class="form-control form-control-sm" id="edit_avg_harga_beli" readonly style="background-color: #e9ecef;" disabled>
                                     <small class="text-muted" style="font-size: 0.75rem;">AVG Harga Beli tidak dapat diubah (dihitung otomatis dari transaksi pembelian).</small>
                                 </div>
                             </div>
@@ -618,20 +671,62 @@ $active_page = 'master_barang';
             $('#btnSimpanEdit').prop('disabled', false).html('Simpan Perubahan');
         });
         
-        // Function untuk edit barang
-        function editBarang(kdBarang, kdMerek, kdKategori, namaBarang, berat, satuanPerdus, avgHargaBeli, hargaJual, status) {
-            $('#edit_kd_barang').val(kdBarang);
-            $('#edit_kd_barang_display').val(kdBarang);
-            $('#edit_kd_merek').val(kdMerek || '');
-            $('#edit_kd_kategori').val(kdKategori || '');
-            $('#edit_nama_barang').val(namaBarang);
-            $('#edit_berat').val(berat);
-            $('#edit_satuan_perdus').val(satuanPerdus);
-            $('#edit_avg_harga_beli').val(avgHargaBeli);
-            $('#edit_harga_jual').val(hargaJual);
-            $('#edit_status').val(status);
-            
-            $('#modalEditBarang').modal('show');
+        // Function untuk membuka modal edit barang
+        function openEditModal(kdBarang) {
+            // AJAX untuk mengambil data barang
+            $.ajax({
+                url: 'master_barang.php',
+                method: 'GET',
+                data: {
+                    get_barang_data: '1',
+                    kd_barang: kdBarang
+                },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.success) {
+                        var data = response.data;
+                        
+                        // Set nilai form
+                        $('#edit_kd_barang').val(data.kd_barang);
+                        $('#edit_kd_barang_display').val(data.kd_barang);
+                        $('#edit_kd_merek').val(data.kd_merek || '');
+                        $('#edit_kd_kategori').val(data.kd_kategori || '');
+                        $('#edit_nama_barang').val(data.nama_barang);
+                        $('#edit_berat').val(data.berat || 0);
+                        $('#edit_satuan_perdus').val(data.satuan_perdus || 1);
+                        
+                        // Format AVG Harga Beli dengan rupiah
+                        var avgHargaBeliNum = parseFloat(data.avg_harga_beli) || 0;
+                        var avgHargaBeliFormatted = avgHargaBeliNum > 0 
+                            ? 'Rp ' + avgHargaBeliNum.toLocaleString('id-ID') 
+                            : 'Rp 0';
+                        $('#edit_avg_harga_beli').val(avgHargaBeliFormatted);
+                        
+                        $('#edit_harga_jual').val(data.harga_jual || 0);
+                        $('#edit_status').val(data.status || 'AKTIF');
+                        
+                        // Buka modal menggunakan Bootstrap 5
+                        var modalElement = document.getElementById('modalEditBarang');
+                        var modal = new bootstrap.Modal(modalElement);
+                        modal.show();
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error!',
+                            text: response.message || 'Gagal mengambil data barang!',
+                            confirmButtonColor: '#e74c3c'
+                        });
+                    }
+                },
+                error: function() {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error!',
+                        text: 'Terjadi kesalahan saat mengambil data barang!',
+                        confirmButtonColor: '#e74c3c'
+                    });
+                }
+            });
         }
     </script>
 </body>
