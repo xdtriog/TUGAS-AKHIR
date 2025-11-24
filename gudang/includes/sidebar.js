@@ -32,6 +32,19 @@ document.addEventListener('DOMContentLoaded', function() {
             if (sidebarTitle) sidebarTitle.style.display = 'block';
             localStorage.setItem('sidebarCollapsed', 'false');
         }
+        
+        // Resize DataTables setelah sidebar toggle
+        setTimeout(function() {
+            if (typeof $.fn.DataTable !== 'undefined') {
+                $('.dataTable').each(function() {
+                    if ($.fn.DataTable.isDataTable(this)) {
+                        $(this).DataTable().columns.adjust().draw();
+                    }
+                });
+            }
+            // Trigger window resize untuk memastikan layout update
+            window.dispatchEvent(new Event('resize'));
+        }, 300); // Delay sesuai dengan transition duration
     });
     
     // Apply body class on load

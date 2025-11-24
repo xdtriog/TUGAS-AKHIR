@@ -19,7 +19,7 @@ $data_hari_ini = $result_hari_ini->fetch_assoc();
 $total_barang_hari_ini = $data_hari_ini['total_barang'];
 
 // 2. Gross Profit bulan ini
-$query_profit = "SELECT COALESCE(SUM((dnj.HARGA_JUAL_BARANG - COALESCE(mb.AVG_HARGA_BELI, 0)) * dnj.JUMLAH_JUAL_BARANG), 0) as gross_profit
+$query_profit = "SELECT COALESCE(SUM((dnj.HARGA_JUAL_BARANG - COALESCE(mb.AVG_HARGA_BELI_PIECES, 0)) * dnj.JUMLAH_JUAL_BARANG), 0) as gross_profit
                  FROM DETAIL_NOTA_JUAL dnj
                  INNER JOIN NOTA_JUAL nj ON dnj.ID_NOTA_JUAL = nj.ID_NOTA_JUAL
                  INNER JOIN MASTER_BARANG mb ON dnj.KD_BARANG = mb.KD_BARANG

@@ -132,10 +132,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     $id_transfer = isset($_POST['id_transfer']) ? trim($_POST['id_transfer']) : '';
     $detail_kirim = isset($_POST['detail_kirim']) ? $_POST['detail_kirim'] : [];
     
-    if (empty($id_transfer) || !is_array($detail_kirim) || empty($detail_kirim)) {
+    if (empty($id_transfer) || !is_array($detail_kirim)) {
         echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
         exit();
     }
+    
+    // Boleh kosong karena bisa saja semua detail 0 (tidak dikirim)
     
     // Mulai transaksi
     $conn->begin_transaction();
@@ -143,20 +145,29 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     try {
         require_once '../includes/uuid_generator.php';
         
-        // Update status transfer menjadi DIKIRIM dan set WAKTU_KIRIM_TRANSFER
-        $update_transfer = "UPDATE TRANSFER_BARANG 
-                           SET STATUS = 'DIKIRIM', 
-                               WAKTU_KIRIM_TRANSFER = CURRENT_TIMESTAMP,
-                               ID_USERS_PENGIRIM = ?
-                           WHERE ID_TRANSFER_BARANG = ? AND KD_LOKASI_ASAL = ? AND STATUS = 'DIPESAN'";
-        $stmt_transfer = $conn->prepare($update_transfer);
-        if (!$stmt_transfer) {
-            throw new Exception('Gagal prepare query transfer: ' . $conn->error);
+        // Tentukan status transfer berdasarkan apakah ada detail yang dikirim
+        // Status transfer akan diupdate setelah loop detail selesai
+        
+        // Get semua detail transfer untuk transfer ini (untuk mengecek yang tidak dikirim)
+        $query_all_details = "SELECT ID_DETAIL_TRANSFER_BARANG FROM DETAIL_TRANSFER_BARANG 
+                             WHERE ID_TRANSFER_BARANG = ? AND STATUS = 'DIPESAN'";
+        $stmt_all_details = $conn->prepare($query_all_details);
+        if (!$stmt_all_details) {
+            throw new Exception('Gagal prepare query all details: ' . $conn->error);
         }
-        $stmt_transfer->bind_param("sss", $user_id, $id_transfer, $kd_lokasi);
-        if (!$stmt_transfer->execute()) {
-            throw new Exception('Gagal update transfer: ' . $stmt_transfer->error);
+        $stmt_all_details->bind_param("s", $id_transfer);
+        $stmt_all_details->execute();
+        $result_all_details = $stmt_all_details->get_result();
+        
+        // Kumpulkan semua ID detail yang ada
+        $all_detail_ids = [];
+        while ($row = $result_all_details->fetch_assoc()) {
+            $all_detail_ids[] = $row['ID_DETAIL_TRANSFER_BARANG'];
         }
+        
+        // Kumpulkan ID detail yang dikirim (jumlah > 0)
+        $detail_kirim_ids = [];
+        $total_detail_kirim = 0;
         
         // Update setiap detail transfer
         foreach ($detail_kirim as $detail) {
@@ -164,11 +175,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             $jumlah_kirim_dus = intval($detail['jumlah_kirim_dus'] ?? 0);
             $kd_barang = $detail['kd_barang'] ?? '';
             
-            if (empty($id_detail) || $jumlah_kirim_dus <= 0 || empty($kd_barang)) {
+            if (empty($id_detail) || empty($kd_barang)) {
                 continue; // Skip invalid data
             }
             
-            // Update detail transfer: set JUMLAH_KIRIM_DUS dan STATUS = 'DIKIRIM'
+            // Jika jumlah kirim = 0, ubah status menjadi TIDAK_DIKIRIM
+            if ($jumlah_kirim_dus <= 0) {
+                $update_detail_tidak_kirim = "UPDATE DETAIL_TRANSFER_BARANG 
+                                             SET JUMLAH_KIRIM_DUS = 0, STATUS = 'TIDAK_DIKIRIM'
+                                             WHERE ID_DETAIL_TRANSFER_BARANG = ? AND ID_TRANSFER_BARANG = ? AND STATUS = 'DIPESAN'";
+                $stmt_detail_tidak_kirim = $conn->prepare($update_detail_tidak_kirim);
+                if (!$stmt_detail_tidak_kirim) {
+                    throw new Exception('Gagal prepare query detail tidak kirim: ' . $conn->error);
+                }
+                $stmt_detail_tidak_kirim->bind_param("ss", $id_detail, $id_transfer);
+                if (!$stmt_detail_tidak_kirim->execute()) {
+                    throw new Exception('Gagal update detail transfer tidak kirim: ' . $stmt_detail_tidak_kirim->error);
+                }
+                continue; // Skip untuk update stock
+            }
+            
+            // Jika jumlah kirim > 0, update detail transfer: set JUMLAH_KIRIM_DUS dan STATUS = 'DIKIRIM'
             $update_detail = "UPDATE DETAIL_TRANSFER_BARANG 
                              SET JUMLAH_KIRIM_DUS = ?, STATUS = 'DIKIRIM'
                              WHERE ID_DETAIL_TRANSFER_BARANG = ? AND ID_TRANSFER_BARANG = ? AND STATUS = 'DIPESAN'";
@@ -180,6 +207,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             if (!$stmt_detail->execute()) {
                 throw new Exception('Gagal update detail transfer: ' . $stmt_detail->error);
             }
+            
+            $detail_kirim_ids[] = $id_detail;
+            $total_detail_kirim++;
             
             // Get SATUAN dari STOCK
             $query_satuan = "SELECT SATUAN, JUMLAH_BARANG FROM STOCK WHERE KD_BARANG = ? AND KD_LOKASI = ?";
@@ -252,9 +282,59 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             }
         }
         
+        // Kumpulkan ID detail yang sudah diproses (baik yang 0 maupun > 0)
+        $detail_processed_ids = [];
+        foreach ($detail_kirim as $detail) {
+            $id_detail = $detail['id_detail_transfer'] ?? '';
+            if (!empty($id_detail)) {
+                $detail_processed_ids[] = $id_detail;
+            }
+        }
+        
+        // Update status detail yang tidak ada di $detail_kirim (tidak diproses sama sekali)
+        foreach ($all_detail_ids as $detail_id) {
+            if (!in_array($detail_id, $detail_processed_ids)) {
+                // Detail ini tidak ada di request, ubah menjadi TIDAK_DIKIRIM
+                $update_detail_tidak_kirim = "UPDATE DETAIL_TRANSFER_BARANG 
+                                             SET JUMLAH_KIRIM_DUS = 0, STATUS = 'TIDAK_DIKIRIM'
+                                             WHERE ID_DETAIL_TRANSFER_BARANG = ? AND ID_TRANSFER_BARANG = ? AND STATUS = 'DIPESAN'";
+                $stmt_detail_tidak_kirim = $conn->prepare($update_detail_tidak_kirim);
+                if (!$stmt_detail_tidak_kirim) {
+                    throw new Exception('Gagal prepare query detail tidak kirim: ' . $conn->error);
+                }
+                $stmt_detail_tidak_kirim->bind_param("ss", $detail_id, $id_transfer);
+                if (!$stmt_detail_tidak_kirim->execute()) {
+                    throw new Exception('Gagal update detail transfer tidak kirim: ' . $stmt_detail_tidak_kirim->error);
+                }
+            }
+        }
+        
+        // Update status transfer berdasarkan apakah ada detail yang dikirim
+        if ($total_detail_kirim > 0) {
+            // Ada yang dikirim, status = DIKIRIM
+            $update_transfer = "UPDATE TRANSFER_BARANG 
+                               SET STATUS = 'DIKIRIM', 
+                                   WAKTU_KIRIM_TRANSFER = CURRENT_TIMESTAMP,
+                                   ID_USERS_PENGIRIM = ?
+                               WHERE ID_TRANSFER_BARANG = ? AND KD_LOKASI_ASAL = ? AND STATUS = 'DIPESAN'";
+            $stmt_transfer = $conn->prepare($update_transfer);
+            if (!$stmt_transfer) {
+                throw new Exception('Gagal prepare query transfer: ' . $conn->error);
+            }
+            $stmt_transfer->bind_param("sss", $user_id, $id_transfer, $kd_lokasi);
+            if (!$stmt_transfer->execute()) {
+                throw new Exception('Gagal update transfer: ' . $stmt_transfer->error);
+            }
+            $message = 'Transfer berhasil divalidasi dan dikirim!';
+        } else {
+            // Semua tidak dikirim, tetap status DIPESAN (tidak diubah ke DIBATALKAN karena itu untuk pemilik)
+            // Transfer tetap DIPESAN, hanya detail yang statusnya TIDAK_DIKIRIM
+            $message = 'Validasi selesai. Semua barang tidak dikirim.';
+        }
+        
         // Commit transaksi
         $conn->commit();
-        echo json_encode(['success' => true, 'message' => 'Transfer berhasil divalidasi dan dikirim!']);
+        echo json_encode(['success' => true, 'message' => $message]);
     } catch (Exception $e) {
         // Rollback transaksi
         $conn->rollback();
@@ -274,7 +354,10 @@ $query_transfer = "SELECT
     tb.KD_LOKASI_TUJUAN,
     ml_tujuan.NAMA_LOKASI as NAMA_LOKASI_TUJUAN,
     ml_tujuan.ALAMAT_LOKASI as ALAMAT_LOKASI_TUJUAN,
-    COALESCE(SUM(dtb.JUMLAH_PESAN_TRANSFER_DUS), 0) as TOTAL_DIPESAN_DUS
+    COALESCE(SUM(dtb.JUMLAH_PESAN_TRANSFER_DUS), 0) as TOTAL_DIPESAN_DUS,
+    COUNT(CASE WHEN dtb.STATUS = 'DIPESAN' THEN 1 END) as JUMLAH_DETAIL_DIPESAN,
+    COUNT(CASE WHEN dtb.STATUS = 'TIDAK_DIKIRIM' THEN 1 END) as JUMLAH_DETAIL_TIDAK_DIKIRIM,
+    COUNT(dtb.ID_DETAIL_TRANSFER_BARANG) as TOTAL_DETAIL
 FROM TRANSFER_BARANG tb
 LEFT JOIN MASTER_LOKASI ml_tujuan ON tb.KD_LOKASI_TUJUAN = ml_tujuan.KD_LOKASI
 LEFT JOIN DETAIL_TRANSFER_BARANG dtb ON tb.ID_TRANSFER_BARANG = dtb.ID_TRANSFER_BARANG
@@ -404,26 +487,43 @@ $active_page = 'perpindahan_barang';
                                         <?php 
                                         $status_text = '';
                                         $status_class = '';
-                                        switch($row['STATUS']) {
-                                            case 'DIPESAN':
-                                                $status_text = 'Dipesan';
-                                                $status_class = 'warning';
-                                                break;
-                                            case 'DIKIRIM':
-                                                $status_text = 'Dikirim';
-                                                $status_class = 'info';
-                                                break;
-                                            case 'SELESAI':
-                                                $status_text = 'Selesai';
-                                                $status_class = 'success';
-                                                break;
-                                            case 'DIBATALKAN':
-                                                $status_text = 'Dibatalkan';
-                                                $status_class = 'danger';
-                                                break;
-                                            default:
-                                                $status_text = $row['STATUS'];
-                                                $status_class = 'secondary';
+                                        
+                                        // Cek apakah semua detail sudah TIDAK_DIKIRIM
+                                        $total_detail = intval($row['TOTAL_DETAIL'] ?? 0);
+                                        $jumlah_detail_tidak_dikirim = intval($row['JUMLAH_DETAIL_TIDAK_DIKIRIM'] ?? 0);
+                                        $status_transfer = $row['STATUS'];
+                                        
+                                        // Jika status transfer = DIPESAN dan semua detail sudah TIDAK_DIKIRIM, tampilkan sebagai TIDAK_DIKIRIM
+                                        if ($status_transfer == 'DIPESAN' && $total_detail > 0 && $jumlah_detail_tidak_dikirim == $total_detail) {
+                                            $status_text = 'Tidak Dikirim';
+                                            $status_class = 'secondary';
+                                        } else {
+                                            // Gunakan status transfer asli
+                                            switch($status_transfer) {
+                                                case 'DIPESAN':
+                                                    $status_text = 'Dipesan';
+                                                    $status_class = 'warning';
+                                                    break;
+                                                case 'DIKIRIM':
+                                                    $status_text = 'Dikirim';
+                                                    $status_class = 'info';
+                                                    break;
+                                                case 'SELESAI':
+                                                    $status_text = 'Selesai';
+                                                    $status_class = 'success';
+                                                    break;
+                                                case 'DIBATALKAN':
+                                                    $status_text = 'Dibatalkan';
+                                                    $status_class = 'danger';
+                                                    break;
+                                                case 'TIDAK_DIKIRIM':
+                                                    $status_text = 'Tidak Dikirim';
+                                                    $status_class = 'secondary';
+                                                    break;
+                                                default:
+                                                    $status_text = $status_transfer;
+                                                    $status_class = 'secondary';
+                                            }
                                         }
                                         ?>
                                         <span class="badge bg-<?php echo $status_class; ?>"><?php echo $status_text; ?></span>
@@ -431,7 +531,13 @@ $active_page = 'perpindahan_barang';
                                     <td>
                                         <div class="d-flex flex-wrap gap-1">
                                             <button class="btn-view btn-sm" onclick="lihatSuratJalan('<?php echo htmlspecialchars($row['ID_TRANSFER_BARANG']); ?>')">Surat Jalan</button>
-                                            <?php if ($row['STATUS'] == 'DIPESAN'): ?>
+                                            <?php 
+                                            // Tombol Validasi Kirim hanya muncul jika:
+                                            // 1. Status transfer = DIPESAN
+                                            // 2. Masih ada detail dengan status DIPESAN (bisa divalidasi)
+                                            $bisa_validasi = ($row['STATUS'] == 'DIPESAN' && intval($row['JUMLAH_DETAIL_DIPESAN'] ?? 0) > 0);
+                                            if ($bisa_validasi): 
+                                            ?>
                                                 <button class="btn btn-success btn-sm" onclick="validasiKirim('<?php echo htmlspecialchars($row['ID_TRANSFER_BARANG']); ?>')">Validasi Kirim</button>
                                             <?php endif; ?>
                                         </div>
@@ -676,12 +782,25 @@ $active_page = 'perpindahan_barang';
         function simpanValidasiKirim() {
             var idTransfer = $('#validasi_id_transfer').val();
             var detailKirim = [];
+            var detailSemua = [];
+            var detailZero = [];
+            var detailTidakPenuh = [];
             
-            // Kumpulkan data dari tabel
+            // Kumpulkan semua data dari tabel (termasuk yang 0)
             $('#tbodyValidasiKirim tr[data-id-detail]').each(function() {
                 var idDetail = $(this).data('id-detail');
                 var kdBarang = $(this).data('kd-barang');
                 var jumlahKirimDus = parseInt($(this).find('.jumlah-kirim-dus').val()) || 0;
+                var jumlahPesanDus = parseInt($(this).find('.jumlah-kirim-dus').attr('max')) || 0;
+                var namaBarang = $(this).find('td').eq(4).text(); // Kolom Nama Barang
+                
+                detailSemua.push({
+                    id_detail_transfer: idDetail,
+                    kd_barang: kdBarang,
+                    jumlah_kirim_dus: jumlahKirimDus,
+                    jumlah_pesan_dus: jumlahPesanDus,
+                    nama_barang: namaBarang
+                });
                 
                 if (jumlahKirimDus > 0) {
                     detailKirim.push({
@@ -689,23 +808,104 @@ $active_page = 'perpindahan_barang';
                         kd_barang: kdBarang,
                         jumlah_kirim_dus: jumlahKirimDus
                     });
+                    
+                    // Cek apakah tidak kirim semua/penuh
+                    if (jumlahKirimDus < jumlahPesanDus) {
+                        detailTidakPenuh.push({
+                            nama_barang: namaBarang,
+                            jumlah_kirim_dus: jumlahKirimDus,
+                            jumlah_pesan_dus: jumlahPesanDus
+                        });
+                    }
+                } else {
+                    detailZero.push({
+                        nama_barang: namaBarang
+                    });
                 }
             });
             
-            if (detailKirim.length === 0) {
+            // Jika hanya 1 barang dan jumlah kirim = 0, konfirmasi
+            if (detailSemua.length === 1 && detailZero.length === 1) {
                 Swal.fire({
-                    icon: 'warning',
-                    title: 'Peringatan!',
-                    text: 'Minimal satu barang harus memiliki jumlah kirim lebih dari 0!',
-                    confirmButtonColor: '#667eea'
+                    icon: 'question',
+                    title: 'Konfirmasi',
+                    html: 'Jumlah kirim untuk barang <strong>' + detailZero[0].nama_barang + '</strong> adalah 0. Apakah Anda yakin tidak akan mengirim barang ini?',
+                    showCancelButton: true,
+                    confirmButtonText: 'Ya, Yakin',
+                    cancelButtonText: 'Batal',
+                    confirmButtonColor: '#ffc107',
+                    cancelButtonColor: '#6c757d'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        konfirmasiFinalKirim(idTransfer, detailKirim, detailTidakPenuh);
+                    }
                 });
                 return;
             }
             
-            // Konfirmasi
+            // Jika ada yang jumlah kirim = 0 (dan bukan hanya 1 barang)
+            if (detailZero.length > 0 && detailSemua.length > 1) {
+                var message = 'Beberapa barang memiliki jumlah kirim 0:\n\n';
+                detailZero.forEach(function(item) {
+                    message += '- ' + item.nama_barang + '\n';
+                });
+                message += '\nBarang tersebut akan ditandai sebagai "Tidak Dikirim". Apakah Anda yakin?';
+                
+                Swal.fire({
+                    icon: 'question',
+                    title: 'Konfirmasi',
+                    html: message.replace(/\n/g, '<br>'),
+                    showCancelButton: true,
+                    confirmButtonText: 'Ya, Yakin',
+                    cancelButtonText: 'Batal',
+                    confirmButtonColor: '#ffc107',
+                    cancelButtonColor: '#6c757d'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        konfirmasiTidakPenuh(idTransfer, detailKirim, detailTidakPenuh);
+                    }
+                });
+                return;
+            }
+            
+            // Jika tidak ada yang 0, langsung cek tidak penuh
+            konfirmasiTidakPenuh(idTransfer, detailKirim, detailTidakPenuh);
+        }
+        
+        function konfirmasiTidakPenuh(idTransfer, detailKirim, detailTidakPenuh) {
+            // Jika ada yang tidak kirim semua/penuh
+            if (detailTidakPenuh.length > 0) {
+                var message = 'Beberapa barang tidak dikirim secara penuh:\n\n';
+                detailTidakPenuh.forEach(function(item) {
+                    message += '- ' + item.nama_barang + ': Dikirim ' + numberFormat(item.jumlah_kirim_dus) + ' dus dari ' + numberFormat(item.jumlah_pesan_dus) + ' dus\n';
+                });
+                message += '\nApakah Anda yakin ingin melanjutkan?';
+                
+                Swal.fire({
+                    icon: 'question',
+                    title: 'Konfirmasi',
+                    html: message.replace(/\n/g, '<br>'),
+                    showCancelButton: true,
+                    confirmButtonText: 'Ya, Lanjutkan',
+                    cancelButtonText: 'Batal',
+                    confirmButtonColor: '#ffc107',
+                    cancelButtonColor: '#6c757d'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        konfirmasiFinalKirim(idTransfer, detailKirim, detailTidakPenuh);
+                    }
+                });
+            } else {
+                // Semua kirim penuh, langsung konfirmasi final
+                konfirmasiFinalKirim(idTransfer, detailKirim, detailTidakPenuh);
+            }
+        }
+        
+        function konfirmasiFinalKirim(idTransfer, detailKirim, detailTidakPenuh) {
+            // Konfirmasi final
             Swal.fire({
                 icon: 'question',
-                title: 'Konfirmasi',
+                title: 'Konfirmasi Final',
                 text: 'Apakah Anda yakin ingin memvalidasi dan mengirim transfer ini?',
                 showCancelButton: true,
                 confirmButtonText: 'Ya, Simpan',
@@ -714,13 +914,27 @@ $active_page = 'perpindahan_barang';
                 cancelButtonColor: '#6c757d'
             }).then((result) => {
                 if (result.isConfirmed) {
+                    // Kumpulkan semua detail (termasuk yang 0) untuk dikirim ke server
+                    var detailSemuaKirim = [];
+                    $('#tbodyValidasiKirim tr[data-id-detail]').each(function() {
+                        var idDetail = $(this).data('id-detail');
+                        var kdBarang = $(this).data('kd-barang');
+                        var jumlahKirimDus = parseInt($(this).find('.jumlah-kirim-dus').val()) || 0;
+                        
+                        detailSemuaKirim.push({
+                            id_detail_transfer: idDetail,
+                            kd_barang: kdBarang,
+                            jumlah_kirim_dus: jumlahKirimDus
+                        });
+                    });
+                    
                     $.ajax({
                         url: '',
                         method: 'POST',
                         data: {
                             action: 'validasi_kirim',
                             id_transfer: idTransfer,
-                            detail_kirim: detailKirim
+                            detail_kirim: detailSemuaKirim
                         },
                         dataType: 'json',
                         success: function(response) {

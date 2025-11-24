@@ -57,6 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_transfer_data'])) {
     // Get data transfer lengkap
     $query_transfer_data = "SELECT 
         tb.ID_TRANSFER_BARANG,
+        tb.KD_LOKASI_ASAL,
         ml_asal.KD_LOKASI as KD_LOKASI_ASAL,
         ml_asal.NAMA_LOKASI as NAMA_LOKASI_ASAL,
         ml_asal.ALAMAT_LOKASI as ALAMAT_LOKASI_ASAL,
@@ -67,6 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_transfer_data'])) {
         mb.NAMA_BARANG,
         mb.BERAT,
         mb.SATUAN_PERDUS,
+        mb.AVG_HARGA_BELI_PIECES,
         COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
         COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
         COALESCE(s.JUMLAH_BARANG, 0) as STOCK_SEKARANG,
@@ -121,6 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_transfer_data'])) {
             'jumlah_pesan_dus' => $row['JUMLAH_PESAN_TRANSFER_DUS'],
             'jumlah_kirim_dus' => $row['JUMLAH_KIRIM_DUS'],
             'satuan_perdus' => $row['SATUAN_PERDUS'] ?? 1,
+            'avg_harga_beli' => $row['AVG_HARGA_BELI_PIECES'] ?? 0,
             'stock_sekarang' => intval($row['STOCK_SEKARANG'] ?? 0),
             'satuan' => $row['SATUAN'] ?? 'PIECES'
         ];
@@ -167,6 +170,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             throw new Exception('Gagal update transfer: ' . $stmt_transfer->error);
         }
         
+        // Get KD_LOKASI_ASAL dari transfer (sekali saja, digunakan untuk semua detail)
+        $query_transfer_asal = "SELECT KD_LOKASI_ASAL FROM TRANSFER_BARANG WHERE ID_TRANSFER_BARANG = ?";
+        $stmt_transfer_asal = $conn->prepare($query_transfer_asal);
+        if (!$stmt_transfer_asal) {
+            throw new Exception('Gagal prepare query transfer asal: ' . $conn->error);
+        }
+        $stmt_transfer_asal->bind_param("s", $id_transfer);
+        $stmt_transfer_asal->execute();
+        $result_transfer_asal = $stmt_transfer_asal->get_result();
+        if ($result_transfer_asal->num_rows == 0) {
+            throw new Exception('Data transfer tidak ditemukan!');
+        }
+        $transfer_asal_data = $result_transfer_asal->fetch_assoc();
+        $kd_lokasi_asal = $transfer_asal_data['KD_LOKASI_ASAL'];
+        
         // Update setiap detail transfer dan tambahkan stock
         foreach ($detail_masuk as $detail) {
             $id_detail = $detail['id_detail_transfer'] ?? '';
@@ -178,10 +196,31 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 continue; // Skip invalid data
             }
             
+            // Get JUMLAH_KIRIM_DUS dari detail transfer
+            $query_detail_kirim = "SELECT JUMLAH_KIRIM_DUS FROM DETAIL_TRANSFER_BARANG WHERE ID_DETAIL_TRANSFER_BARANG = ?";
+            $stmt_detail_kirim = $conn->prepare($query_detail_kirim);
+            if (!$stmt_detail_kirim) {
+                throw new Exception('Gagal prepare query detail kirim: ' . $conn->error);
+            }
+            $stmt_detail_kirim->bind_param("s", $id_detail);
+            $stmt_detail_kirim->execute();
+            $result_detail_kirim = $stmt_detail_kirim->get_result();
+            if ($result_detail_kirim->num_rows == 0) {
+                continue; // Skip jika detail tidak ditemukan
+            }
+            $detail_kirim_data = $result_detail_kirim->fetch_assoc();
+            $jumlah_kirim_dus = intval($detail_kirim_data['JUMLAH_KIRIM_DUS'] ?? 0);
+            
             // Hitung total masuk (diterima - ditolak)
             $total_masuk_dus = $jumlah_diterima_dus - $jumlah_ditolak_dus;
             if ($total_masuk_dus < 0) {
                 $total_masuk_dus = 0;
+            }
+            
+            // Hitung jumlah rusak = Jumlah Dikirim - Total Masuk
+            $jumlah_rusak_dus = $jumlah_kirim_dus - $total_masuk_dus;
+            if ($jumlah_rusak_dus < 0) {
+                $jumlah_rusak_dus = 0;
             }
             
             // Update detail transfer: set JUMLAH_DITOLAK_DUS, TOTAL_MASUK_DUS, STATUS = 'SELESAI'
@@ -200,8 +239,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 throw new Exception('Gagal update detail transfer: ' . $stmt_detail->error);
             }
             
-            // Get SATUAN dan SATUAN_PERDUS
-            $query_barang = "SELECT mb.SATUAN_PERDUS, COALESCE(s.SATUAN, 'PIECES') as SATUAN, COALESCE(s.JUMLAH_BARANG, 0) as JUMLAH_BARANG
+            // Get SATUAN, SATUAN_PERDUS, dan AVG_HARGA_BELI_PIECES
+            $query_barang = "SELECT mb.SATUAN_PERDUS, mb.AVG_HARGA_BELI_PIECES, COALESCE(s.SATUAN, 'PIECES') as SATUAN, COALESCE(s.JUMLAH_BARANG, 0) as JUMLAH_BARANG
                             FROM MASTER_BARANG mb
                             LEFT JOIN STOCK s ON mb.KD_BARANG = s.KD_BARANG AND s.KD_LOKASI = ?
                             WHERE mb.KD_BARANG = ?";
@@ -220,7 +259,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             $barang_data = $result_barang->fetch_assoc();
             $satuan = $barang_data['SATUAN'];
             $satuan_perdus = intval($barang_data['SATUAN_PERDUS'] ?? 1);
+            $avg_harga_beli = floatval($barang_data['AVG_HARGA_BELI_PIECES'] ?? 0);
             $jumlah_awal = intval($barang_data['JUMLAH_BARANG'] ?? 0);
+            
+            // Get stock gudang (lokasi asal) untuk STOCK_HISTORY
+            $query_stock_gudang = "SELECT COALESCE(JUMLAH_BARANG, 0) as JUMLAH_BARANG, COALESCE(SATUAN, 'DUS') as SATUAN
+                                  FROM STOCK
+                                  WHERE KD_BARANG = ? AND KD_LOKASI = ?";
+            $stmt_stock_gudang = $conn->prepare($query_stock_gudang);
+            if (!$stmt_stock_gudang) {
+                throw new Exception('Gagal prepare query stock gudang: ' . $conn->error);
+            }
+            $stmt_stock_gudang->bind_param("ss", $kd_barang, $kd_lokasi_asal);
+            $stmt_stock_gudang->execute();
+            $result_stock_gudang = $stmt_stock_gudang->get_result();
+            $stock_gudang_data = $result_stock_gudang->num_rows > 0 ? $result_stock_gudang->fetch_assoc() : ['JUMLAH_BARANG' => 0, 'SATUAN' => 'DUS'];
+            $jumlah_awal_gudang = intval($stock_gudang_data['JUMLAH_BARANG'] ?? 0);
+            $satuan_gudang = $stock_gudang_data['SATUAN'] ?? 'DUS';
             
             // Konversi total masuk dari DUS ke PIECES
             $total_masuk_pieces = $total_masuk_dus * $satuan_perdus;
@@ -272,6 +327,59 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal, $jumlah_perubahan, $jumlah_akhir, $id_transfer, $satuan);
             if (!$stmt_history->execute()) {
                 throw new Exception('Gagal insert history: ' . $stmt_history->error);
+            }
+            
+            // Insert ke MUTASI_BARANG_RUSAK jika ada barang rusak
+            // Jumlah rusak = Jumlah Dikirim - Total Masuk
+            if ($jumlah_rusak_dus > 0) {
+                // Hitung harga rusak: avg_harga_beli adalah per piece, jadi harga total = avg_harga_beli * jumlah rusak (dalam pieces)
+                $jumlah_rusak_pieces = $jumlah_rusak_dus * $satuan_perdus;
+                $harga_rusak = $avg_harga_beli * $jumlah_rusak_pieces;
+                
+                $id_mutasi_rusak = '';
+                do {
+                    $id_mutasi_rusak = ShortIdGenerator::generate(16, '');
+                } while (checkUUIDExists($conn, 'MUTASI_BARANG_RUSAK', 'ID_MUTASI_BARANG_RUSAK', $id_mutasi_rusak));
+                
+                $insert_mutasi_rusak = "INSERT INTO MUTASI_BARANG_RUSAK 
+                                      (ID_MUTASI_BARANG_RUSAK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_MUTASI, HARGA_BARANG_PIECES, SATUAN)
+                                      VALUES (?, ?, ?, ?, ?, ?, ?)";
+                $stmt_mutasi_rusak = $conn->prepare($insert_mutasi_rusak);
+                if (!$stmt_mutasi_rusak) {
+                    throw new Exception('Gagal prepare query mutasi rusak: ' . $conn->error);
+                }
+                // Jumlah rusak dalam DUS, jadi SATUAN = 'DUS'
+                $satuan_mutasi = 'DUS';
+                $stmt_mutasi_rusak->bind_param("ssssids", $id_mutasi_rusak, $kd_barang, $kd_lokasi_asal, $user_id, $jumlah_rusak_dus, $harga_rusak, $satuan_mutasi);
+                if (!$stmt_mutasi_rusak->execute()) {
+                    throw new Exception('Gagal insert mutasi rusak: ' . $stmt_mutasi_rusak->error);
+                }
+                
+                // Insert ke STOCK_HISTORY untuk gudang (lokasi asal) dengan REF = ID_DETAIL_TRANSFER_BARANG
+                $id_history_gudang = '';
+                do {
+                    $id_history_gudang = ShortIdGenerator::generate(16, '');
+                } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history_gudang));
+                
+                // Konversi jumlah rusak dari DUS ke PIECES untuk gudang
+                $jumlah_rusak_pieces_gudang = $jumlah_rusak_dus * $satuan_perdus;
+                $jumlah_akhir_gudang = $jumlah_awal_gudang - $jumlah_rusak_pieces_gudang;
+                if ($jumlah_akhir_gudang < 0) {
+                    $jumlah_akhir_gudang = 0;
+                }
+                
+                $jumlah_perubahan_gudang = -$jumlah_rusak_pieces_gudang; // Negatif karena mengurangi stock
+                $insert_history_gudang = "INSERT INTO STOCK_HISTORY 
+                                        (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, 'RUSAK', ?, ?)";
+                $stmt_history_gudang = $conn->prepare($insert_history_gudang);
+                if (!$stmt_history_gudang) {
+                    throw new Exception('Gagal prepare query insert history gudang: ' . $conn->error);
+                }
+                $stmt_history_gudang->bind_param("ssssiiiss", $id_history_gudang, $kd_barang, $kd_lokasi_asal, $user_id, $jumlah_awal_gudang, $jumlah_perubahan_gudang, $jumlah_akhir_gudang, $id_detail, $satuan_gudang);
+                if (!$stmt_history_gudang->execute()) {
+                    throw new Exception('Gagal insert history gudang: ' . $stmt_history_gudang->error);
+                }
             }
         }
         
@@ -667,7 +775,7 @@ $active_page = 'barang_masuk';
                     '<td>' + escapeHtml(item.nama_barang) + '</td>' +
                     '<td>' + numberFormat(item.jumlah_pesan_dus) + '</td>' +
                     '<td>' + numberFormat(item.jumlah_kirim_dus) + '</td>' +
-                    '<td><input type="number" class="form-control form-control-sm jumlah-diterima-dus" min="0" max="' + item.jumlah_kirim_dus + '" value="0" data-index="' + index + '" data-jumlah-kirim="' + item.jumlah_kirim_dus + '" style="width: 80px;"></td>' +
+                    '                                    <td><input type="number" class="form-control form-control-sm jumlah-diterima-dus" min="0" max="' + item.jumlah_kirim_dus + '" value="0" data-index="' + index + '" data-jumlah-kirim="' + item.jumlah_kirim_dus + '" style="width: 80px;"></td>' +
                     '<td><input type="number" class="form-control form-control-sm jumlah-ditolak-dus" min="0" max="' + item.jumlah_kirim_dus + '" value="0" data-index="' + index + '" style="width: 80px;"></td>' +
                     '<td class="total-masuk-dus">' + numberFormat(totalMasukDus) + '</td>' +
                     '<td>' + numberFormat(item.satuan_perdus) + '</td>' +
@@ -681,6 +789,11 @@ $active_page = 'barang_masuk';
             
             // Attach event listeners
             attachValidasiMasukEventListeners();
+            
+            // Hitung total masuk untuk setiap row setelah render
+            data.forEach(function(item, index) {
+                calculateValidasiMasuk(index);
+            });
         }
         
         function attachValidasiMasukEventListeners() {
@@ -744,6 +857,7 @@ $active_page = 'barang_masuk';
             var row = $('tr[data-index="' + index + '"]');
             var jumlahDiterimaDus = parseInt(row.find('.jumlah-diterima-dus').val()) || 0;
             var jumlahDitolakDus = parseInt(row.find('.jumlah-ditolak-dus').val()) || 0;
+            var jumlahKirimDus = parseInt(row.find('.jumlah-diterima-dus').data('jumlah-kirim')) || 0;
             var satuanPerdus = parseInt(row.find('.total-masuk-pieces').text().replace(/\./g, '')) || 0;
             var stockSekarang = parseInt(row.find('td').eq(12).text().replace(/\./g, '')) || 0;
             

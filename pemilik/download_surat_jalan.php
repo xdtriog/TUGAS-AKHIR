@@ -54,8 +54,9 @@ ORDER BY
         WHEN dtb.STATUS = 'DIPESAN' THEN 1
         WHEN dtb.STATUS = 'DIKIRIM' THEN 2
         WHEN dtb.STATUS = 'SELESAI' THEN 3
-        WHEN dtb.STATUS = 'DIBATALKAN' THEN 4
-        ELSE 5
+        WHEN dtb.STATUS = 'TIDAK_DIKIRIM' THEN 4
+        WHEN dtb.STATUS = 'DIBATALKAN' THEN 5
+        ELSE 6
     END ASC,
     dtb.ID_DETAIL_TRANSFER_BARANG ASC";
 $stmt_surat = $conn->prepare($query_surat_jalan);
@@ -108,6 +109,7 @@ while ($row = $result_surat->fetch_assoc()) {
     if ($row['STATUS_DETAIL'] == 'DIBATALKAN') {
         $has_cancelled = true;
     }
+    // TIDAK_DIKIRIM tidak dianggap sebagai cancelled (hanya untuk watermark)
 }
 ?>
 <!DOCTYPE html>
@@ -361,6 +363,10 @@ while ($row = $result_surat->fetch_assoc()) {
                                     case 'SELESAI':
                                         $status_text = 'Selesai';
                                         $status_bg = '#28a745';
+                                        break;
+                                    case 'TIDAK_DIKIRIM':
+                                        $status_text = 'Tidak Dikirim';
+                                        $status_bg = '#6c757d';
                                         break;
                                     default:
                                         $status_text = $row['STATUS_DETAIL'];

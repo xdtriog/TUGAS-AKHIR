@@ -266,13 +266,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             }
         }
         
-        // Update AVG_HARGA_BELI di MASTER_BARANG
-        // Hitung weighted average dari semua pembelian yang sudah selesai
+        // Update AVG_HARGA_BELI_PIECES di MASTER_BARANG
+        // Hitung weighted average per PIECE dari semua pembelian yang sudah selesai
+        // HARGA_PESAN_BARANG_DUS adalah harga per dus, perlu dikonversi ke harga per piece
         if ($harga_pesan_dus > 0 && $total_masuk > 0) {
+            // Query untuk menghitung weighted average per PIECE
+            // HARGA_PESAN_BARANG_DUS adalah harga per dus
+            // TOTAL_MASUK_DUS adalah jumlah dus yang masuk
+            // mb.SATUAN_PERDUS adalah jumlah pieces per dus
+            // 
+            // Untuk menghitung harga per piece:
+            // - Total harga untuk semua pieces = HARGA_PESAN_BARANG_DUS * TOTAL_MASUK_DUS (total harga dalam rupiah)
+            // - Total pieces = TOTAL_MASUK_DUS * SATUAN_PERDUS
+            // - Harga per piece = (HARGA_PESAN_BARANG_DUS * TOTAL_MASUK_DUS) / (TOTAL_MASUK_DUS * SATUAN_PERDUS)
+            //                    = HARGA_PESAN_BARANG_DUS / SATUAN_PERDUS
+            //
+            // Untuk weighted average dari semua pembelian:
+            // - total_harga_quantity = SUM(HARGA_PESAN_BARANG_DUS * TOTAL_MASUK_DUS) untuk semua pembelian
+            // - total_quantity = SUM(TOTAL_MASUK_DUS * SATUAN_PERDUS) untuk semua pembelian
+            // - avg_harga_beli = total_harga_quantity / total_quantity (harga per piece)
             $query_avg = "SELECT 
                 COALESCE(SUM(pb.HARGA_PESAN_BARANG_DUS * pb.TOTAL_MASUK_DUS), 0) as total_harga_quantity,
-                COALESCE(SUM(pb.TOTAL_MASUK_DUS), 0) as total_quantity
+                COALESCE(SUM(pb.TOTAL_MASUK_DUS * mb.SATUAN_PERDUS), 0) as total_quantity
             FROM PESAN_BARANG pb
+            INNER JOIN MASTER_BARANG mb ON pb.KD_BARANG = mb.KD_BARANG
             WHERE pb.KD_BARANG = ? AND pb.STATUS = 'SELESAI' AND pb.TOTAL_MASUK_DUS > 0";
             $stmt_avg = $conn->prepare($query_avg);
             if (!$stmt_avg) {
@@ -290,17 +307,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 $total_quantity = $avg_data['total_quantity'];
                 
                 if ($total_quantity > 0) {
+                    // AVG_HARGA_BELI_PIECES per piece = total_harga_quantity / total_quantity
+                    // total_harga_quantity = total harga dalam rupiah untuk semua pieces
+                    // total_quantity = total pieces dari semua pembelian
                     $avg_harga_beli = $total_harga_quantity / $total_quantity;
                     
-                    // Update AVG_HARGA_BELI di MASTER_BARANG
-                    $update_avg = "UPDATE MASTER_BARANG SET AVG_HARGA_BELI = ? WHERE KD_BARANG = ?";
+                    // Update AVG_HARGA_BELI_PIECES di MASTER_BARANG (per piece)
+                    $update_avg = "UPDATE MASTER_BARANG SET AVG_HARGA_BELI_PIECES = ? WHERE KD_BARANG = ?";
                     $stmt_update_avg = $conn->prepare($update_avg);
                     if (!$stmt_update_avg) {
                         throw new Exception('Gagal prepare query update avg harga: ' . $conn->error);
                     }
                     $stmt_update_avg->bind_param("ds", $avg_harga_beli, $kd_barang);
                     if (!$stmt_update_avg->execute()) {
-                        throw new Exception('Gagal mengupdate AVG_HARGA_BELI: ' . $stmt_update_avg->error);
+                        throw new Exception('Gagal mengupdate AVG_HARGA_BELI_PIECES: ' . $stmt_update_avg->error);
                     }
                 }
             }
@@ -694,6 +714,8 @@ $active_page = 'barang_masuk';
                         $('#validasi_nama_barang').val(data.nama_barang);
                         $('#validasi_berat').val(data.berat.toLocaleString('id-ID'));
                         $('#validasi_jumlah_dipesan').val(data.jumlah_dipesan.toLocaleString('id-ID'));
+                        // Simpan jumlah dipesan dalam format angka untuk perbandingan
+                        $('#validasi_jumlah_dipesan').data('jumlah-dipesan', data.jumlah_dipesan);
                         $('#validasi_jumlah_dikirim').val(data.jumlah_dikirim);
                         $('#validasi_jumlah_ditolak').val(data.jumlah_ditolak);
                         // Format rupiah untuk harga dan biaya pengiriman
@@ -857,6 +879,45 @@ $active_page = 'barang_masuk';
                 });
                 return;
             }
+
+            // Cek apakah total masuk sesuai dengan jumlah yang dipesan
+            var jumlahDipesan = parseInt($('#validasi_jumlah_dipesan').data('jumlah-dipesan')) || 0;
+            
+            if (totalMasuk !== jumlahDipesan) {
+                // Tampilkan konfirmasi jika total masuk tidak sesuai dengan yang dipesan
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Konfirmasi Total Masuk',
+                    html: 'Total masuk (' + totalMasuk.toLocaleString('id-ID') + ' dus) tidak sesuai dengan jumlah yang dipesan (' + jumlahDipesan.toLocaleString('id-ID') + ' dus).<br><br>Apakah Anda yakin ingin melanjutkan?',
+                    showCancelButton: true,
+                    confirmButtonText: 'Ya, Lanjutkan',
+                    cancelButtonText: 'Batal',
+                    confirmButtonColor: '#28a745',
+                    cancelButtonColor: '#6c757d'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        // Jika user konfirmasi, lanjutkan proses validasi
+                        prosesValidasi();
+                    }
+                });
+                return;
+            }
+
+            // Jika total masuk sesuai dengan yang dipesan, langsung proses validasi
+            prosesValidasi();
+        }
+
+        function prosesValidasi() {
+            var jumlahDikirim = parseInt($('#validasi_jumlah_dikirim').val()) || 0;
+            var jumlahDitolak = parseInt($('#validasi_jumlah_ditolak').val()) || 0;
+            
+            // Ambil total masuk dari input (hilangkan format angka)
+            var totalMasukStr = $('#validasi_total_masuk').val().replace(/\./g, '').replace(/,/g, '');
+            var totalMasuk = parseInt(totalMasukStr) || 0;
+
+            // Ambil harga dan biaya pengiriman (hapus format rupiah)
+            var hargaPesanDus = unformatRupiah($('#validasi_harga_pesan').val()) || 0;
+            var biayaPengiriman = unformatRupiah($('#validasi_biaya_pengiriman').val()) || 0;
 
             // AJAX request untuk validasi
             $.ajax({

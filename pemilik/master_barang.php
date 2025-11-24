@@ -28,8 +28,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
         mb.NAMA_BARANG,
         mb.BERAT,
         mb.SATUAN_PERDUS,
-        mb.AVG_HARGA_BELI,
-        mb.HARGA_JUAL_BARANG,
+        mb.AVG_HARGA_BELI_PIECES,
+        mb.HARGA_JUAL_BARANG_PIECES,
         mb.STATUS
     FROM MASTER_BARANG mb
     WHERE mb.KD_BARANG = ?";
@@ -54,8 +54,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
             'nama_barang' => $barang_data['NAMA_BARANG'],
             'berat' => $barang_data['BERAT'] ?? 0,
             'satuan_perdus' => $barang_data['SATUAN_PERDUS'],
-            'avg_harga_beli' => $barang_data['AVG_HARGA_BELI'] ?? 0,
-            'harga_jual' => $barang_data['HARGA_JUAL_BARANG'] ?? 0,
+            'avg_harga_beli' => $barang_data['AVG_HARGA_BELI_PIECES'] ?? 0,
+            'harga_jual' => $barang_data['HARGA_JUAL_BARANG_PIECES'] ?? 0,
             'status' => $barang_data['STATUS']
         ]
     ]);
@@ -159,8 +159,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $kd_merek = !empty($kd_merek) ? $kd_merek : null;
             $kd_kategori = !empty($kd_kategori) ? $kd_kategori : null;
             
-            // Update data (AVG_HARGA_BELI tidak diupdate karena readonly)
-            $update_query = "UPDATE MASTER_BARANG SET KD_MEREK_BARANG = ?, KD_KATEGORI_BARANG = ?, NAMA_BARANG = ?, BERAT = ?, SATUAN_PERDUS = ?, HARGA_JUAL_BARANG = ?, STATUS = ? WHERE KD_BARANG = ?";
+            // Update data (AVG_HARGA_BELI_PIECES tidak diupdate karena readonly)
+            $update_query = "UPDATE MASTER_BARANG SET KD_MEREK_BARANG = ?, KD_KATEGORI_BARANG = ?, NAMA_BARANG = ?, BERAT = ?, SATUAN_PERDUS = ?, HARGA_JUAL_BARANG_PIECES = ?, STATUS = ? WHERE KD_BARANG = ?";
             $update_stmt = $conn->prepare($update_query);
             $update_stmt->bind_param("sssiidss", $kd_merek, $kd_kategori, $nama_barang, $berat, $satuan_perdus, $harga_jual, $status, $kd_barang);
             
@@ -201,8 +201,8 @@ $query_barang = "SELECT
                     COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
                     COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
                     mb.SATUAN_PERDUS,
-                    mb.AVG_HARGA_BELI,
-                    mb.HARGA_JUAL_BARANG,
+                    mb.AVG_HARGA_BELI_PIECES,
+                    mb.HARGA_JUAL_BARANG_PIECES,
                     mb.LAST_UPDATED,
                     mb.STATUS
                  FROM MASTER_BARANG mb
@@ -287,8 +287,8 @@ $active_page = 'master_barang';
                                     <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
                                     <td><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
                                     <td><?php echo number_format($row['SATUAN_PERDUS'], 0, ',', '.'); ?></td>
-                                    <td>Rp <?php echo number_format($row['AVG_HARGA_BELI'], 0, ',', '.'); ?></td>
-                                    <td>Rp <?php echo number_format($row['HARGA_JUAL_BARANG'], 0, ',', '.'); ?></td>
+                                    <td>Rp <?php echo number_format($row['AVG_HARGA_BELI_PIECES'], 0, ',', '.'); ?></td>
+                                    <td>Rp <?php echo number_format($row['HARGA_JUAL_BARANG_PIECES'], 0, ',', '.'); ?></td>
                                     <td><?php echo date('d/m/Y H:i', strtotime($row['LAST_UPDATED'])); ?> WIB</td>
                                     <td>
                                         <span class="badge <?php echo $row['STATUS'] == 'AKTIF' ? 'bg-success' : 'bg-secondary'; ?>">

@@ -117,10 +117,10 @@ $query_riwayat = "SELECT
     tb.STATUS as STATUS_TRANSFER,
     tb.KD_LOKASI_ASAL,
     tb.KD_LOKASI_TUJUAN,
-    s.SATUAN
+    COALESCE(s.SATUAN, 'PIECES') as SATUAN
 FROM DETAIL_TRANSFER_BARANG dtb
 INNER JOIN TRANSFER_BARANG tb ON dtb.ID_TRANSFER_BARANG = tb.ID_TRANSFER_BARANG
-INNER JOIN STOCK s ON dtb.KD_BARANG = s.KD_BARANG AND tb.KD_LOKASI_TUJUAN = s.KD_LOKASI
+LEFT JOIN STOCK s ON dtb.KD_BARANG = s.KD_BARANG AND tb.KD_LOKASI_TUJUAN = s.KD_LOKASI
 WHERE dtb.KD_BARANG = ? AND tb.KD_LOKASI_TUJUAN = ?
 ORDER BY tb.WAKTU_PESAN_TRANSFER DESC, dtb.ID_DETAIL_TRANSFER_BARANG DESC";
 
@@ -292,6 +292,10 @@ $active_page = 'stock';
                                             case 'DIBATALKAN':
                                                 $status_text = 'Dibatalkan';
                                                 $status_class = 'danger';
+                                                break;
+                                            case 'TIDAK_DIKIRIM':
+                                                $status_text = 'Tidak Dikirim';
+                                                $status_class = 'secondary';
                                                 break;
                                             default:
                                                 $status_text = $row['STATUS_DETAIL'];

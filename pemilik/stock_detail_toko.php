@@ -121,6 +121,16 @@ if (isset($_GET['get_resupply_data']) && $_GET['get_resupply_data'] == '1') {
         exit();
     }
     
+    // Cari lokasi gudang (asal)
+    $query_gudang = "SELECT KD_LOKASI FROM MASTER_LOKASI WHERE TYPE_LOKASI = 'gudang' AND STATUS = 'AKTIF' LIMIT 1";
+    $result_gudang = $conn->query($query_gudang);
+    if ($result_gudang->num_rows == 0) {
+        echo json_encode(['success' => false, 'message' => 'Tidak ada gudang aktif!']);
+        exit();
+    }
+    $gudang = $result_gudang->fetch_assoc();
+    $kd_lokasi_gudang = $gudang['KD_LOKASI'];
+    
     // Buat placeholders untuk IN clause
     $placeholders = str_repeat('?,', count($kd_barang_list) - 1) . '?';
     
@@ -134,18 +144,21 @@ if (isset($_GET['get_resupply_data']) && $_GET['get_resupply_data'] == '1') {
         s.JUMLAH_BARANG as STOCK_SEKARANG,
         s.JUMLAH_MIN_STOCK,
         s.JUMLAH_MAX_STOCK,
-        s.SATUAN
+        s.SATUAN,
+        COALESCE(sg.JUMLAH_BARANG, 0) as STOCK_GUDANG,
+        COALESCE(sg.SATUAN, 'PIECES') as SATUAN_GUDANG
     FROM STOCK s
     INNER JOIN MASTER_BARANG mb ON s.KD_BARANG = mb.KD_BARANG
     LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
     LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
+    LEFT JOIN STOCK sg ON mb.KD_BARANG = sg.KD_BARANG AND sg.KD_LOKASI = ?
     WHERE s.KD_BARANG IN ($placeholders) AND s.KD_LOKASI = ? AND mb.STATUS = 'AKTIF'
     ORDER BY mb.NAMA_BARANG ASC";
     // Note: Filter STATUS = 'AKTIF' tetap diperlukan untuk resupply karena hanya barang aktif yang bisa di-resupply
     
     $stmt_resupply = $conn->prepare($query_resupply);
-    $types = str_repeat('s', count($kd_barang_list)) . 's';
-    $params = array_merge($kd_barang_list, [$kd_lokasi]);
+    $types = str_repeat('s', count($kd_barang_list)) . 'ss';
+    $params = array_merge([$kd_lokasi_gudang], $kd_barang_list, [$kd_lokasi]);
     $stmt_resupply->bind_param($types, ...$params);
     $stmt_resupply->execute();
     $result_resupply = $stmt_resupply->get_result();
@@ -162,11 +175,112 @@ if (isset($_GET['get_resupply_data']) && $_GET['get_resupply_data'] == '1') {
             'stock_max' => $row['JUMLAH_MAX_STOCK'],
             'stock_sekarang' => $row['STOCK_SEKARANG'],
             'satuan_perdus' => $row['SATUAN_PERDUS'],
-            'satuan' => $row['SATUAN']
+            'satuan' => $row['SATUAN'],
+            'stock_gudang' => $row['STOCK_GUDANG'],
+            'satuan_gudang' => $row['SATUAN_GUDANG']
         ];
     }
     
     echo json_encode(['success' => true, 'data' => $data]);
+    exit();
+}
+
+// Handle AJAX request untuk cek stock gudang
+if (isset($_GET['cek_stock_gudang']) && $_GET['cek_stock_gudang'] == '1') {
+    header('Content-Type: application/json');
+    
+    $resupply_data = isset($_GET['resupply_data']) ? json_decode($_GET['resupply_data'], true) : [];
+    
+    if (empty($resupply_data) || !is_array($resupply_data)) {
+        echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
+        exit();
+    }
+    
+    // Cari lokasi gudang (asal)
+    $query_gudang = "SELECT KD_LOKASI FROM MASTER_LOKASI WHERE TYPE_LOKASI = 'gudang' AND STATUS = 'AKTIF' LIMIT 1";
+    $result_gudang = $conn->query($query_gudang);
+    if ($result_gudang->num_rows == 0) {
+        echo json_encode(['success' => false, 'message' => 'Tidak ada gudang aktif!']);
+        exit();
+    }
+    $gudang = $result_gudang->fetch_assoc();
+    $kd_lokasi_gudang = $gudang['KD_LOKASI'];
+    
+    $stock_tidak_cukup = [];
+    
+    foreach ($resupply_data as $item) {
+        $kd_barang = $item['kd_barang'] ?? '';
+        $jumlah_resupply_dus = intval($item['jumlah_resupply_dus'] ?? 0);
+        
+        if (empty($kd_barang) || $jumlah_resupply_dus <= 0) {
+            continue;
+        }
+        
+        // Get stock gudang dan satuan perdus
+        $query_stock_gudang = "SELECT 
+            COALESCE(s.JUMLAH_BARANG, 0) as STOCK_GUDANG,
+            COALESCE(s.SATUAN, 'DUS') as SATUAN,
+            mb.SATUAN_PERDUS,
+            mb.NAMA_BARANG
+        FROM MASTER_BARANG mb
+        LEFT JOIN STOCK s ON mb.KD_BARANG = s.KD_BARANG AND s.KD_LOKASI = ?
+        WHERE mb.KD_BARANG = ?";
+        $stmt_stock_gudang = $conn->prepare($query_stock_gudang);
+        $stmt_stock_gudang->bind_param("ss", $kd_lokasi_gudang, $kd_barang);
+        $stmt_stock_gudang->execute();
+        $result_stock_gudang = $stmt_stock_gudang->get_result();
+        
+        if ($result_stock_gudang->num_rows > 0) {
+            $stock_data = $result_stock_gudang->fetch_assoc();
+            $stock_gudang = intval($stock_data['STOCK_GUDANG']);
+            $satuan = $stock_data['SATUAN'] ?? 'DUS';
+            $satuan_perdus = intval($stock_data['SATUAN_PERDUS'] ?? 1);
+            $nama_barang = $stock_data['NAMA_BARANG'];
+            
+            // Konversi stock gudang ke DUS untuk perbandingan
+            // Jika SATUAN = 'PIECES', konversi ke DUS: stock_gudang / satuan_perdus
+            // Jika SATUAN = 'DUS', langsung gunakan stock_gudang
+            $stock_gudang_dus = $stock_gudang;
+            if ($satuan == 'PIECES') {
+                $stock_gudang_dus = floor($stock_gudang / $satuan_perdus);
+            }
+            
+            // Cek apakah stock gudang (dalam DUS) cukup untuk jumlah resupply (dalam DUS)
+            if ($stock_gudang_dus < $jumlah_resupply_dus) {
+                $stock_tidak_cukup[] = [
+                    'kd_barang' => $kd_barang,
+                    'nama_barang' => $nama_barang,
+                    'jumlah_resupply_dus' => $jumlah_resupply_dus,
+                    'stock_gudang_dus' => $stock_gudang_dus,
+                    'stock_gudang' => $stock_gudang,
+                    'satuan' => $satuan
+                ];
+            }
+        } else {
+            // Barang tidak ditemukan di gudang, berarti stock = 0
+            $query_nama_barang = "SELECT NAMA_BARANG FROM MASTER_BARANG WHERE KD_BARANG = ?";
+            $stmt_nama_barang = $conn->prepare($query_nama_barang);
+            $stmt_nama_barang->bind_param("s", $kd_barang);
+            $stmt_nama_barang->execute();
+            $result_nama_barang = $stmt_nama_barang->get_result();
+            $nama_barang = $result_nama_barang->num_rows > 0 ? $result_nama_barang->fetch_assoc()['NAMA_BARANG'] : $kd_barang;
+            
+            $stock_tidak_cukup[] = [
+                'kd_barang' => $kd_barang,
+                'nama_barang' => $nama_barang,
+                'jumlah_resupply_dus' => $jumlah_resupply_dus,
+                'stock_gudang_dus' => 0,
+                'stock_gudang' => 0,
+                'satuan' => 'DUS'
+            ];
+        }
+    }
+    
+    echo json_encode([
+        'success' => true,
+        'stock_tidak_cukup' => $stock_tidak_cukup,
+        'ada_stock_tidak_cukup' => count($stock_tidak_cukup) > 0
+    ]);
     exit();
 }
 
@@ -192,6 +306,130 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     $gudang = $result_gudang->fetch_assoc();
     $kd_lokasi_asal = $gudang['KD_LOKASI'];
     
+    // Cek stock gudang sebelum menyimpan
+    $stock_habis = [];
+    $query_gudang_check = "SELECT KD_LOKASI FROM MASTER_LOKASI WHERE TYPE_LOKASI = 'gudang' AND STATUS = 'AKTIF' LIMIT 1";
+    $result_gudang_check = $conn->query($query_gudang_check);
+    if ($result_gudang_check->num_rows == 0) {
+        echo json_encode(['success' => false, 'message' => 'Tidak ada gudang aktif!']);
+        exit();
+    }
+    $gudang_check = $result_gudang_check->fetch_assoc();
+    $kd_lokasi_gudang_check = $gudang_check['KD_LOKASI'];
+    
+    foreach ($resupply_data as $item) {
+        $kd_barang = $item['kd_barang'] ?? '';
+        $jumlah_resupply_dus = intval($item['jumlah_resupply_dus'] ?? 0);
+        
+        if (empty($kd_barang) || $jumlah_resupply_dus <= 0) {
+            continue;
+        }
+        
+        // Get stock gudang dan satuan perdus
+        $query_stock_gudang_check = "SELECT 
+            COALESCE(s.JUMLAH_BARANG, 0) as STOCK_GUDANG,
+            COALESCE(s.SATUAN, 'DUS') as SATUAN,
+            mb.SATUAN_PERDUS,
+            mb.NAMA_BARANG
+        FROM MASTER_BARANG mb
+        LEFT JOIN STOCK s ON mb.KD_BARANG = s.KD_BARANG AND s.KD_LOKASI = ?
+        WHERE mb.KD_BARANG = ?";
+        $stmt_stock_gudang_check = $conn->prepare($query_stock_gudang_check);
+        $stmt_stock_gudang_check->bind_param("ss", $kd_lokasi_gudang_check, $kd_barang);
+        $stmt_stock_gudang_check->execute();
+        $result_stock_gudang_check = $stmt_stock_gudang_check->get_result();
+        
+        if ($result_stock_gudang_check->num_rows > 0) {
+            $stock_data_check = $result_stock_gudang_check->fetch_assoc();
+            $stock_gudang_check = intval($stock_data_check['STOCK_GUDANG']);
+            $satuan_check = $stock_data_check['SATUAN'] ?? 'DUS';
+            $satuan_perdus_check = intval($stock_data_check['SATUAN_PERDUS'] ?? 1);
+            $nama_barang_check = $stock_data_check['NAMA_BARANG'];
+            
+            // Konversi stock gudang ke DUS untuk perbandingan
+            // Jika SATUAN = 'PIECES', konversi ke DUS: stock_gudang / satuan_perdus
+            // Jika SATUAN = 'DUS', langsung gunakan stock_gudang
+            $stock_gudang_dus_check = $stock_gudang_check;
+            if ($satuan_check == 'PIECES') {
+                $stock_gudang_dus_check = floor($stock_gudang_check / $satuan_perdus_check);
+            }
+            
+            // Cek apakah stock gudang (dalam DUS) habis atau tidak cukup untuk jumlah resupply (dalam DUS)
+            if ($stock_gudang_dus_check <= 0) {
+                $stock_habis[] = [
+                    'kd_barang' => $kd_barang,
+                    'nama_barang' => $nama_barang_check,
+                    'stock_gudang_dus' => 0,
+                    'stock_gudang' => $stock_gudang_check,
+                    'satuan' => $satuan_check,
+                    'pesan' => 'Stock gudang habis'
+                ];
+            } elseif ($stock_gudang_dus_check < $jumlah_resupply_dus) {
+                $stock_habis[] = [
+                    'kd_barang' => $kd_barang,
+                    'nama_barang' => $nama_barang_check,
+                    'jumlah_resupply_dus' => $jumlah_resupply_dus,
+                    'stock_gudang_dus' => $stock_gudang_dus_check,
+                    'stock_gudang' => $stock_gudang_check,
+                    'satuan' => $satuan_check,
+                    'pesan' => 'Stock gudang tidak mencukupi'
+                ];
+            }
+        } else {
+            // Barang tidak ditemukan di gudang, berarti stock = 0
+            $query_nama_barang = "SELECT NAMA_BARANG FROM MASTER_BARANG WHERE KD_BARANG = ?";
+            $stmt_nama_barang = $conn->prepare($query_nama_barang);
+            $stmt_nama_barang->bind_param("s", $kd_barang);
+            $stmt_nama_barang->execute();
+            $result_nama_barang = $stmt_nama_barang->get_result();
+            $nama_barang_check = $result_nama_barang->num_rows > 0 ? $result_nama_barang->fetch_assoc()['NAMA_BARANG'] : $kd_barang;
+            
+            $stock_habis[] = [
+                'kd_barang' => $kd_barang,
+                'nama_barang' => $nama_barang_check,
+                'stock_gudang_dus' => 0,
+                'stock_gudang' => 0,
+                'satuan' => 'DUS',
+                'pesan' => 'Stock gudang habis'
+            ];
+        }
+    }
+    
+    // Filter resupply_data: hanya simpan barang yang stocknya cukup
+    $resupply_data_valid = [];
+    $kd_barang_stock_habis = [];
+    
+    foreach ($stock_habis as $item) {
+        $kd_barang_stock_habis[] = $item['kd_barang'];
+    }
+    
+    foreach ($resupply_data as $item) {
+        $kd_barang = $item['kd_barang'] ?? '';
+        // Hanya tambahkan jika tidak ada di list stock habis
+        if (!in_array($kd_barang, $kd_barang_stock_habis)) {
+            $resupply_data_valid[] = $item;
+        }
+    }
+    
+    // Jika tidak ada barang yang valid, tolak semua
+    if (empty($resupply_data_valid)) {
+        $message = 'Barang berikut tidak dapat di-resupply karena stock gudang habis atau tidak mencukupi:\n\n';
+        foreach ($stock_habis as $item) {
+            $message .= '- ' . $item['nama_barang'] . ' (' . $item['kd_barang'] . '): ' . $item['pesan'];
+            if (isset($item['jumlah_resupply_dus'])) {
+                $message .= ' (Butuh: ' . number_format($item['jumlah_resupply_dus'], 0, ',', '.') . ' dus, Stock gudang: ' . number_format($item['stock_gudang_dus'], 0, ',', '.') . ' dus)';
+            } else {
+                $message .= ' (Stock gudang: ' . number_format($item['stock_gudang_dus'], 0, ',', '.') . ' dus)';
+            }
+            $message .= '\n';
+        }
+        echo json_encode(['success' => false, 'message' => $message, 'stock_habis' => $stock_habis]);
+        exit();
+    }
+    
+    // Update resupply_data dengan yang valid saja
+    $resupply_data = $resupply_data_valid;
+    
     // Mulai transaksi
     $conn->begin_transaction();
     
@@ -204,14 +442,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         } while (checkUUIDExists($conn, 'TRANSFER_BARANG', 'ID_TRANSFER_BARANG', $id_transfer));
         
         // Insert TRANSFER_BARANG
+        // ID_USERS_PENERIMA diisi NULL karena owner tidak mengisi, nanti toko yang mengisi saat validasi masuk
         $insert_transfer = "INSERT INTO TRANSFER_BARANG 
                           (ID_TRANSFER_BARANG, ID_USERS_PENERIMA, KD_LOKASI_ASAL, KD_LOKASI_TUJUAN, WAKTU_PESAN_TRANSFER, STATUS)
-                          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, 'DIPESAN')";
+                          VALUES (?, NULL, ?, ?, CURRENT_TIMESTAMP, 'DIPESAN')";
         $stmt_transfer = $conn->prepare($insert_transfer);
         if (!$stmt_transfer) {
             throw new Exception('Gagal prepare query transfer: ' . $conn->error);
         }
-        $stmt_transfer->bind_param("ssss", $id_transfer, $user_id, $kd_lokasi_asal, $kd_lokasi);
+        $stmt_transfer->bind_param("sss", $id_transfer, $kd_lokasi_asal, $kd_lokasi);
         if (!$stmt_transfer->execute()) {
             throw new Exception('Gagal insert transfer: ' . $stmt_transfer->error);
         }
@@ -246,7 +485,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         
         // Commit transaksi
         $conn->commit();
-        echo json_encode(['success' => true, 'message' => 'Resupply berhasil dibuat dengan ID: ' . $id_transfer]);
+        
+        // Siapkan response dengan informasi barang yang berhasil dan yang gagal
+        $message = 'Resupply berhasil dibuat dengan ID: ' . $id_transfer;
+        if (!empty($stock_habis)) {
+            $message .= '\n\nBarang yang berhasil disimpan: ' . count($resupply_data) . ' item';
+            $message .= '\nBarang yang tidak dapat disimpan: ' . count($stock_habis) . ' item (stock gudang habis/tidak mencukupi)';
+        }
+        
+        echo json_encode([
+            'success' => true, 
+            'message' => $message,
+            'id_transfer' => $id_transfer,
+            'barang_berhasil' => count($resupply_data),
+            'barang_gagal' => count($stock_habis),
+            'stock_habis' => $stock_habis
+        ]);
     } catch (Exception $e) {
         // Rollback transaksi
         $conn->rollback();
@@ -801,7 +1055,7 @@ $active_page = 'stock';
                     '<td><input type="number" class="form-control form-control-sm jumlah-resupply-dus" min="0" value="0" data-index="' + index + '" style="width: 80px;"></td>' +
                     '<td class="jumlah-resupply-piece" data-index="' + index + '">0</td>' +
                     '<td class="jumlah-stock-akhir" data-index="' + index + '">' + numberFormat(item.stock_sekarang) + '</td>' +
-                    '<td><input type="checkbox" class="form-check-input isi-penuh" data-index="' + index + '" data-stock-max="' + item.stock_max + '" data-stock-sekarang="' + item.stock_sekarang + '" data-satuan-perdus="' + item.satuan_perdus + '"></td>' +
+                    '<td><input type="checkbox" class="form-check-input isi-penuh" data-index="' + index + '" data-stock-max="' + item.stock_max + '" data-stock-sekarang="' + item.stock_sekarang + '" data-satuan-perdus="' + item.satuan_perdus + '" data-stock-gudang="' + (item.stock_gudang || 0) + '" data-satuan-gudang="' + (item.satuan_gudang || 'PIECES') + '"></td>' +
                     '</tr>';
                 tbody.append(row);
             });
@@ -831,16 +1085,25 @@ $active_page = 'stock';
                     
                     // Jika maksimalPieces <= 0, berarti sudah mencapai atau melebihi stock max
                     if (maksimalPieces <= 0) {
-                        // Tidak bisa resupply karena sudah mencapai atau melebihi stock max
-                        $('.jumlah-resupply-dus[data-index="' + index + '"]').val(0);
-                        $(this).prop('checked', false);
+                        // Konfirmasi apakah tetap ingin mengisi penuh meskipun sudah mencapai stock max
                         Swal.fire({
-                            icon: 'warning',
-                            title: 'Peringatan!',
-                            text: 'Stock sudah mencapai atau melebihi Stock Max. Tidak dapat melakukan resupply.',
+                            icon: 'question',
+                            title: 'Konfirmasi',
+                            text: 'Stock sudah mencapai atau melebihi Stock Max. Apakah Anda tetap ingin mengisi penuh?',
+                            showCancelButton: true,
+                            confirmButtonText: 'Ya, Isi Penuh',
+                            cancelButtonText: 'Batal',
                             confirmButtonColor: '#667eea',
-                            timer: 2000,
-                            timerProgressBar: true
+                            cancelButtonColor: '#6c757d'
+                        }).then((result) => {
+                            if (result.isConfirmed) {
+                                // Set jumlah dus = 0 (karena sudah mencapai max)
+                                $('.jumlah-resupply-dus[data-index="' + index + '"]').val(0);
+                                calculateResupply(index);
+                            } else {
+                                // Uncheck checkbox
+                                $(this).prop('checked', false);
+                            }
                         });
                         return;
                     }
@@ -873,46 +1136,45 @@ $active_page = 'stock';
             // Hitung stock akhir
             var stockAkhir = stockSekarang + jumlahPiece;
             
-            // Validasi: stock akhir tidak boleh melebihi stock max (boleh sama dengan stock max)
-            if (stockMax > 0 && stockAkhir > stockMax) {
-                // Kurangi jumlah dus jika melebihi stock max
-                var maksimalPieces = stockMax - stockSekarang;
-                if (maksimalPieces > 0) {
-                    jumlahDus = Math.floor(maksimalPieces / satuanPerdus);
-                    jumlahPiece = jumlahDus * satuanPerdus;
-                    stockAkhir = stockSekarang + jumlahPiece;
-                    
-                    // Update input jika diubah
-                    row.find('.jumlah-resupply-dus').val(jumlahDus);
-                    
-                    // Uncheck "Isi Penuh" jika ada
-                    row.find('.isi-penuh').prop('checked', false);
-                } else {
-                    // Tidak bisa resupply
-                    jumlahDus = 0;
-                    jumlahPiece = 0;
-                    stockAkhir = stockSekarang;
-                    row.find('.jumlah-resupply-dus').val(0);
-                    row.find('.isi-penuh').prop('checked', false);
-                }
-            }
-            
-            // Update tampilan
+            // Update tampilan (tidak ada validasi yang memblokir input)
             row.find('.jumlah-resupply-piece').text(numberFormat(jumlahPiece));
             row.find('.jumlah-stock-akhir').text(numberFormat(stockAkhir));
+            
+            // Tampilkan peringatan visual jika melebihi stock max (tapi tidak memblokir)
+            if (stockMax > 0 && stockAkhir > stockMax) {
+                // Tambahkan class warning untuk styling (opsional)
+                row.find('.jumlah-stock-akhir').addClass('text-danger fw-bold');
+            } else {
+                row.find('.jumlah-stock-akhir').removeClass('text-danger fw-bold');
+            }
         }
         
         function konfirmasiSimpanResupply() {
             // Validasi minimal ada satu barang dengan jumlah resupply > 0
             var hasValidData = false;
             var resupplyData = [];
+            var hasExceedMax = false;
+            var exceedItems = [];
             
             $('tr[data-kd-barang]').each(function() {
                 var kdBarang = $(this).data('kd-barang');
                 var jumlahDus = parseInt($(this).find('.jumlah-resupply-dus').val()) || 0;
+                var stockMax = parseInt($(this).find('.isi-penuh').data('stock-max')) || 0;
+                var stockSekarang = parseInt($(this).find('.isi-penuh').data('stock-sekarang')) || 0;
+                var satuanPerdus = parseInt($(this).find('.isi-penuh').data('satuan-perdus')) || 1;
                 
                 if (jumlahDus > 0) {
                     hasValidData = true;
+                    var jumlahPiece = jumlahDus * satuanPerdus;
+                    var stockAkhir = stockSekarang + jumlahPiece;
+                    
+                    // Cek apakah melebihi stock max
+                    if (stockMax > 0 && stockAkhir > stockMax) {
+                        hasExceedMax = true;
+                        var namaBarang = $(this).find('td').eq(3).text(); // Kolom Nama Barang
+                        exceedItems.push(namaBarang + ' (Stock akhir: ' + numberFormat(stockAkhir) + ', Stock Max: ' + numberFormat(stockMax) + ')');
+                    }
+                    
                     resupplyData.push({
                         kd_barang: kdBarang,
                         jumlah_resupply_dus: jumlahDus
@@ -930,21 +1192,107 @@ $active_page = 'stock';
                 return;
             }
             
-            // Konfirmasi
-            Swal.fire({
-                icon: 'question',
-                title: 'Konfirmasi',
-                text: 'Apakah Anda yakin ingin menyimpan resupply ini?',
-                showCancelButton: true,
-                confirmButtonText: 'Ya, Simpan',
-                cancelButtonText: 'Batal',
-                confirmButtonColor: '#667eea',
-                cancelButtonColor: '#6c757d'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    simpanResupply(resupplyData);
+            // Cek stock gudang terlebih dahulu
+            $.ajax({
+                url: '',
+                method: 'GET',
+                data: {
+                    cek_stock_gudang: '1',
+                    resupply_data: JSON.stringify(resupplyData)
+                },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.success && response.ada_stock_tidak_cukup) {
+                        // Ada stock yang tidak cukup
+                        var message = 'Stock gudang tidak mencukupi untuk beberapa barang:\n\n';
+                        response.stock_tidak_cukup.forEach(function(item) {
+                            if (item.jumlah_resupply_dus) {
+                                message += item.nama_barang + ': Butuh ' + numberFormat(item.jumlah_resupply_dus) + ' dus, Stock gudang: ' + numberFormat(item.stock_gudang_dus) + ' dus\n';
+                            } else {
+                                message += item.nama_barang + ': Stock gudang: ' + numberFormat(item.stock_gudang_dus) + ' dus\n';
+                            }
+                        });
+                        message += '\nApakah Anda yakin ingin melanjutkan?';
+                        
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Stock Gudang Tidak Cukup!',
+                            html: message.replace(/\n/g, '<br>'),
+                            showCancelButton: true,
+                            confirmButtonText: 'Ya, Lanjutkan',
+                            cancelButtonText: 'Batal',
+                            confirmButtonColor: '#ffc107',
+                            cancelButtonColor: '#6c757d'
+                        }).then((result) => {
+                            if (result.isConfirmed) {
+                                konfirmasiFinalResupply(resupplyData, hasExceedMax, exceedItems);
+                            }
+                        });
+                    } else {
+                        // Stock gudang cukup, lanjutkan ke konfirmasi normal
+                        konfirmasiFinalResupply(resupplyData, hasExceedMax, exceedItems);
+                    }
+                },
+                error: function() {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error!',
+                        text: 'Terjadi kesalahan saat mengecek stock gudang!',
+                        confirmButtonColor: '#e74c3c'
+                    });
                 }
             });
+        }
+        
+        function konfirmasiFinalResupply(resupplyData, hasExceedMax, exceedItems) {
+            // Jika ada yang melebihi stock max, tampilkan konfirmasi khusus
+            if (hasExceedMax) {
+                var message = 'Beberapa barang akan melebihi Stock Max:\n\n' + exceedItems.join('\n') + '\n\nApakah Anda yakin ingin melanjutkan?';
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Peringatan Stock Max!',
+                    html: message.replace(/\n/g, '<br>'),
+                    showCancelButton: true,
+                    confirmButtonText: 'Ya, Lanjutkan',
+                    cancelButtonText: 'Batal',
+                    confirmButtonColor: '#ffc107',
+                    cancelButtonColor: '#6c757d'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        // Konfirmasi final
+                        Swal.fire({
+                            icon: 'question',
+                            title: 'Konfirmasi Final',
+                            text: 'Apakah Anda yakin ingin menyimpan resupply ini?',
+                            showCancelButton: true,
+                            confirmButtonText: 'Ya, Simpan',
+                            cancelButtonText: 'Batal',
+                            confirmButtonColor: '#667eea',
+                            cancelButtonColor: '#6c757d'
+                        }).then((result2) => {
+                            if (result2.isConfirmed) {
+                                simpanResupply(resupplyData);
+                            }
+                        });
+                    }
+                });
+            } else {
+                // Konfirmasi normal jika tidak ada yang melebihi stock max
+                Swal.fire({
+                    icon: 'question',
+                    title: 'Konfirmasi Final',
+                    text: 'Apakah Anda yakin ingin menyimpan resupply ini?',
+                    showCancelButton: true,
+                    confirmButtonText: 'Ya, Simpan',
+                    cancelButtonText: 'Batal',
+                    confirmButtonColor: '#667eea',
+                    cancelButtonColor: '#6c757d'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        simpanResupply(resupplyData);
+                    }
+                });
+            }
         }
         
         function simpanResupply(resupplyData) {
@@ -958,25 +1306,78 @@ $active_page = 'stock';
                 dataType: 'json',
                 success: function(response) {
                     if (response.success) {
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'Berhasil!',
-                            text: response.message,
-                            confirmButtonColor: '#667eea',
-                            timer: 2000,
-                            timerProgressBar: true
-                        }).then(() => {
-                            // Tutup modal dan reload halaman
-                            $('#modalResupply').modal('hide');
-                            location.reload();
-                        });
+                        // Cek apakah ada barang yang gagal disimpan
+                        if (response.stock_habis && response.stock_habis.length > 0) {
+                            // Ada yang berhasil dan ada yang gagal
+                            var message = 'Resupply berhasil dibuat dengan ID: <strong>' + response.id_transfer + '</strong>\n\n';
+                            message += 'Barang yang berhasil disimpan: <strong>' + response.barang_berhasil + ' item</strong>\n';
+                            message += 'Barang yang tidak dapat disimpan: <strong>' + response.barang_gagal + ' item</strong> (stock gudang habis/tidak mencukupi)\n\n';
+                            message += 'Barang yang tidak dapat disimpan:\n';
+                            response.stock_habis.forEach(function(item) {
+                                message += '- ' + item.nama_barang + ' (' + item.kd_barang + '): ' + item.pesan;
+                                if (item.jumlah_resupply_dus) {
+                                    message += ' (Butuh: ' + numberFormat(item.jumlah_resupply_dus) + ' dus, Stock gudang: ' + numberFormat(item.stock_gudang_dus) + ' dus)';
+                                } else {
+                                    message += ' (Stock gudang: ' + numberFormat(item.stock_gudang_dus) + ' dus)';
+                                }
+                                message += '\n';
+                            });
+                            
+                            Swal.fire({
+                                icon: 'warning',
+                                title: 'Resupply Berhasil (Sebagian)',
+                                html: message.replace(/\n/g, '<br>'),
+                                confirmButtonColor: '#ffc107',
+                                width: '600px'
+                            }).then(() => {
+                                // Tutup modal dan reload halaman
+                                $('#modalResupply').modal('hide');
+                                location.reload();
+                            });
+                        } else {
+                            // Semua berhasil
+                            Swal.fire({
+                                icon: 'success',
+                                title: 'Berhasil!',
+                                text: response.message,
+                                confirmButtonColor: '#667eea',
+                                timer: 2000,
+                                timerProgressBar: true
+                            }).then(() => {
+                                // Tutup modal dan reload halaman
+                                $('#modalResupply').modal('hide');
+                                location.reload();
+                            });
+                        }
                     } else {
-                        Swal.fire({
-                            icon: 'error',
-                            title: 'Gagal!',
-                            text: response.message,
-                            confirmButtonColor: '#e74c3c'
-                        });
+                        // Cek apakah ada stock_habis untuk format khusus
+                        if (response.stock_habis && response.stock_habis.length > 0) {
+                            var message = 'Barang berikut tidak dapat di-resupply karena stock gudang habis atau tidak mencukupi:\n\n';
+                            response.stock_habis.forEach(function(item) {
+                                message += '- ' + item.nama_barang + ' (' + item.kd_barang + '): ' + item.pesan;
+                                if (item.jumlah_resupply_dus) {
+                                    message += ' (Butuh: ' + numberFormat(item.jumlah_resupply_dus) + ' dus, Stock gudang: ' + numberFormat(item.stock_gudang_dus) + ' dus)';
+                                } else {
+                                    message += ' (Stock gudang: ' + numberFormat(item.stock_gudang_dus) + ' dus)';
+                                }
+                                message += '\n';
+                            });
+                            
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Stock Gudang Habis!',
+                                html: message.replace(/\n/g, '<br>'),
+                                confirmButtonColor: '#e74c3c',
+                                width: '600px'
+                            });
+                        } else {
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Gagal!',
+                                text: response.message,
+                                confirmButtonColor: '#e74c3c'
+                            });
+                        }
                     }
                 },
                 error: function(xhr, status, error) {
