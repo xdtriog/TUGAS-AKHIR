@@ -217,11 +217,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 $total_masuk_dus = 0;
             }
             
-            // Hitung jumlah rusak = Jumlah Dikirim - Total Masuk
-            $jumlah_rusak_dus = $jumlah_kirim_dus - $total_masuk_dus;
-            if ($jumlah_rusak_dus < 0) {
-                $jumlah_rusak_dus = 0;
-            }
+            // Hitung jumlah mutasi = Total Masuk - Jumlah Dikirim (bisa negatif)
+            // Jika positif = kelebihan, jika negatif = kurang/rusak
+            $jumlah_rusak_dus = $total_masuk_dus - $jumlah_kirim_dus;
             
             // Update detail transfer: set JUMLAH_DITOLAK_DUS, TOTAL_MASUK_DUS, STATUS = 'SELESAI'
             // Note: JUMLAH_DITERIMA_DUS tidak ada di database, menggunakan TOTAL_MASUK_DUS = jumlah_diterima_dus - jumlah_ditolak_dus
@@ -329,12 +327,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 throw new Exception('Gagal insert history: ' . $stmt_history->error);
             }
             
-            // Insert ke MUTASI_BARANG_RUSAK jika ada barang rusak
-            // Jumlah rusak = Jumlah Dikirim - Total Masuk
-            if ($jumlah_rusak_dus > 0) {
-                // Hitung harga rusak: avg_harga_beli adalah per piece, jadi harga total = avg_harga_beli * jumlah rusak (dalam pieces)
+            // Insert ke MUTASI_BARANG_RUSAK jika ada selisih (rusak atau lebih)
+            // JUMLAH_MUTASI_DUS = Total Masuk - Jumlah Dikirim (bisa positif atau negatif)
+            // Jika positif = kelebihan, jika negatif = kurang/rusak
+            if ($jumlah_rusak_dus != 0) {
+                // Hitung total barang pieces (bisa negatif)
                 $jumlah_rusak_pieces = $jumlah_rusak_dus * $satuan_perdus;
-                $harga_rusak = $avg_harga_beli * $jumlah_rusak_pieces;
+                
+                // HARGA_BARANG_PIECES diambil dari AVG_HARGA_BELI_PIECES (per piece, selalu positif)
+                $harga_barang_pieces = $avg_harga_beli;
+                
+                // TOTAL_UANG = TOTAL_BARANG_PIECES * HARGA_BARANG_PIECES (bisa negatif jika TOTAL_BARANG_PIECES negatif)
+                $total_uang = $jumlah_rusak_pieces * $harga_barang_pieces;
                 
                 $id_mutasi_rusak = '';
                 do {
@@ -342,33 +346,34 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 } while (checkUUIDExists($conn, 'MUTASI_BARANG_RUSAK', 'ID_MUTASI_BARANG_RUSAK', $id_mutasi_rusak));
                 
                 $insert_mutasi_rusak = "INSERT INTO MUTASI_BARANG_RUSAK 
-                                      (ID_MUTASI_BARANG_RUSAK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_MUTASI, HARGA_BARANG_PIECES, SATUAN)
-                                      VALUES (?, ?, ?, ?, ?, ?, ?)";
+                                      (ID_MUTASI_BARANG_RUSAK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_MUTASI_DUS, SATUAN_PERDUS, TOTAL_BARANG_PIECES, HARGA_BARANG_PIECES, TOTAL_UANG)
+                                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 $stmt_mutasi_rusak = $conn->prepare($insert_mutasi_rusak);
                 if (!$stmt_mutasi_rusak) {
                     throw new Exception('Gagal prepare query mutasi rusak: ' . $conn->error);
                 }
-                // Jumlah rusak dalam DUS, jadi SATUAN = 'DUS'
-                $satuan_mutasi = 'DUS';
-                $stmt_mutasi_rusak->bind_param("ssssids", $id_mutasi_rusak, $kd_barang, $kd_lokasi_asal, $user_id, $jumlah_rusak_dus, $harga_rusak, $satuan_mutasi);
+                $stmt_mutasi_rusak->bind_param("ssssiiidd", $id_mutasi_rusak, $kd_barang, $kd_lokasi_asal, $user_id, $jumlah_rusak_dus, $satuan_perdus, $jumlah_rusak_pieces, $harga_barang_pieces, $total_uang);
                 if (!$stmt_mutasi_rusak->execute()) {
                     throw new Exception('Gagal insert mutasi rusak: ' . $stmt_mutasi_rusak->error);
                 }
                 
                 // Insert ke STOCK_HISTORY untuk gudang (lokasi asal) dengan REF = ID_DETAIL_TRANSFER_BARANG
+                // Semua nilai dalam DUS
                 $id_history_gudang = '';
                 do {
                     $id_history_gudang = ShortIdGenerator::generate(16, '');
                 } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history_gudang));
                 
-                // Konversi jumlah rusak dari DUS ke PIECES untuk gudang
-                $jumlah_rusak_pieces_gudang = $jumlah_rusak_dus * $satuan_perdus;
-                $jumlah_akhir_gudang = $jumlah_awal_gudang - $jumlah_rusak_pieces_gudang;
-                if ($jumlah_akhir_gudang < 0) {
-                    $jumlah_akhir_gudang = 0;
-                }
+                // Untuk STOCK_HISTORY gudang:
+                // JUMLAH_AWAL = jumlah dikirim (dalam DUS)
+                // JUMLAH_PERUBAHAN = total masuk - jumlah dikirim (dalam DUS) = jumlah mutasi (bisa negatif)
+                // JUMLAH_AKHIR = total masuk (dalam DUS)
+                // SATUAN = 'DUS'
+                $jumlah_awal_history_gudang = $jumlah_kirim_dus;
+                $jumlah_perubahan_history_gudang = $jumlah_rusak_dus; // total masuk - jumlah dikirim
+                $jumlah_akhir_history_gudang = $total_masuk_dus;
+                $satuan_history_gudang = 'DUS';
                 
-                $jumlah_perubahan_gudang = -$jumlah_rusak_pieces_gudang; // Negatif karena mengurangi stock
                 $insert_history_gudang = "INSERT INTO STOCK_HISTORY 
                                         (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, 'RUSAK', ?, ?)";
@@ -376,7 +381,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 if (!$stmt_history_gudang) {
                     throw new Exception('Gagal prepare query insert history gudang: ' . $conn->error);
                 }
-                $stmt_history_gudang->bind_param("ssssiiiss", $id_history_gudang, $kd_barang, $kd_lokasi_asal, $user_id, $jumlah_awal_gudang, $jumlah_perubahan_gudang, $jumlah_akhir_gudang, $id_detail, $satuan_gudang);
+                $stmt_history_gudang->bind_param("ssssiiiss", $id_history_gudang, $kd_barang, $kd_lokasi_asal, $user_id, $jumlah_awal_history_gudang, $jumlah_perubahan_history_gudang, $jumlah_akhir_history_gudang, $id_detail, $satuan_history_gudang);
                 if (!$stmt_history_gudang->execute()) {
                     throw new Exception('Gagal insert history gudang: ' . $stmt_history_gudang->error);
                 }
