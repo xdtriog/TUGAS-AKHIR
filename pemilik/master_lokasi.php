@@ -124,6 +124,46 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
             $message = 'Semua field wajib harus diisi!';
             $message_type = 'danger';
         }
+    } elseif ($_POST['action'] == 'tambah_tipe_biaya') {
+        $nama_tipe = trim($_POST['nama_tipe']);
+        
+        if (!empty($nama_tipe)) {
+            // Generate KD_TIPE_BIAYA_OPERASIONAL dengan format TBOP+UUID (total 8 karakter: TBOP=4, UUID=4)
+            $maxAttempts = 100;
+            $attempt = 0;
+            do {
+                $uuid = ShortIdGenerator::generate(4, '');
+                $kd_tipe = 'TBOP' . $uuid;
+                $attempt++;
+                if (!checkUUIDExists($conn, 'MASTER_TIPE_BIAYA_OPERASIONAL', 'KD_TIPE_BIAYA_OPERASIONAL', $kd_tipe)) {
+                    break;
+                }
+            } while ($attempt < $maxAttempts);
+            
+            if ($attempt >= $maxAttempts) {
+                $message = 'Gagal generate kode tipe biaya operasional! Silakan coba lagi.';
+                $message_type = 'danger';
+            } else {
+                // Insert data
+                $insert_query = "INSERT INTO MASTER_TIPE_BIAYA_OPERASIONAL (KD_TIPE_BIAYA_OPERASIONAL, NAMA_TIPE_BIAYA_OPERASIONAL) VALUES (?, ?)";
+                $insert_stmt = $conn->prepare($insert_query);
+                $insert_stmt->bind_param("ss", $kd_tipe, $nama_tipe);
+                
+                if ($insert_stmt->execute()) {
+                    $message = 'Tipe biaya operasional berhasil ditambahkan dengan kode: ' . $kd_tipe;
+                    $message_type = 'success';
+                    header("Location: master_lokasi.php?success_tipe=1&kd_tipe=" . urlencode($kd_tipe));
+                    exit();
+                } else {
+                    $message = 'Gagal menambahkan tipe biaya operasional!';
+                    $message_type = 'danger';
+                }
+                $insert_stmt->close();
+            }
+        } else {
+            $message = 'Nama tipe biaya operasional harus diisi!';
+            $message_type = 'danger';
+        }
     }
 }
 
@@ -133,6 +173,9 @@ if (isset($_GET['success']) && $_GET['success'] == '1') {
     $message_type = 'success';
 } elseif (isset($_GET['success']) && $_GET['success'] == '2') {
     $message = 'Lokasi berhasil diperbarui';
+    $message_type = 'success';
+} elseif (isset($_GET['success_tipe']) && $_GET['success_tipe'] == '1') {
+    $message = 'Tipe biaya operasional berhasil ditambahkan dengan kode: ' . htmlspecialchars($_GET['kd_tipe'] ?? '');
     $message_type = 'success';
 }
 
@@ -180,10 +223,13 @@ $active_page = 'master_lokasi';
             <h1 class="page-title">Pemilik - Master Lokasi</h1>
         </div>
 
-        <!-- Add Button -->
-        <div class="mb-3">
+        <!-- Action Buttons -->
+        <div class="mb-3 d-flex gap-2">
             <button type="button" class="btn-primary-custom" data-bs-toggle="modal" data-bs-target="#modalTambahLokasi">
                 <i class="bi bi-plus-circle"></i> Tambahkan Lokasi
+            </button>
+            <button type="button" class="btn-primary-custom" data-bs-toggle="modal" data-bs-target="#modalTipeBiayaOperasional">
+                Lihat Tipe Biaya Operasional
             </button>
         </div>
 
@@ -383,6 +429,84 @@ $active_page = 'master_lokasi';
         </div>
     </div>
 
+    <!-- Modal Lihat Tipe Biaya Operasional -->
+    <div class="modal fade" id="modalTipeBiayaOperasional" tabindex="-1" aria-labelledby="modalTipeBiayaOperasionalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    <h5 class="modal-title" id="modalTipeBiayaOperasionalLabel">Lihat Tipe Biaya Operasional</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <button type="button" class="btn-primary-custom" onclick="bukaModalTambahTipeBiaya()">
+                            Tambahkan Tipe Biaya Operasional
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table id="tableTipeBiaya" class="table table-custom table-striped table-hover" style="width: 100%;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 50%;">Kode Tipe Biaya Operasional</th>
+                                    <th style="width: 50%;">Nama Tipe Biaya Operasional</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php
+                                // Query untuk mendapatkan data tipe biaya operasional
+                                $query_tipe_biaya = "SELECT KD_TIPE_BIAYA_OPERASIONAL, NAMA_TIPE_BIAYA_OPERASIONAL 
+                                                    FROM MASTER_TIPE_BIAYA_OPERASIONAL 
+                                                    ORDER BY NAMA_TIPE_BIAYA_OPERASIONAL ASC";
+                                $result_tipe_biaya = $conn->query($query_tipe_biaya);
+                                if ($result_tipe_biaya && $result_tipe_biaya->num_rows > 0):
+                                    while ($row_tipe = $result_tipe_biaya->fetch_assoc()):
+                                ?>
+                                    <tr>
+                                        <td><?php echo htmlspecialchars($row_tipe['KD_TIPE_BIAYA_OPERASIONAL']); ?></td>
+                                        <td><?php echo htmlspecialchars($row_tipe['NAMA_TIPE_BIAYA_OPERASIONAL']); ?></td>
+                                    </tr>
+                                <?php 
+                                    endwhile;
+                                endif;
+                                ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Tambah Tipe Biaya Operasional (Nested Modal) -->
+    <div class="modal fade" id="modalTambahTipeBiaya" tabindex="-1" aria-labelledby="modalTambahTipeBiayaLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    <h5 class="modal-title" id="modalTambahTipeBiayaLabel">Tambahkan Tipe Biaya Operasional</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form id="formTambahTipeBiaya" method="POST" action="">
+                    <div class="modal-body">
+                        <input type="hidden" name="action" value="tambah_tipe_biaya">
+                        
+                        <div class="mb-3">
+                            <label for="tambah_nama_tipe_biaya" class="form-label">Nama Tipe Biaya Operasional <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="tambah_nama_tipe_biaya" name="nama_tipe" placeholder="Masukkan nama tipe biaya operasional" maxlength="256" required autofocus>
+                            <small class="text-muted">Kode tipe biaya operasional akan dibuat otomatis dengan format TBOP+UUID.</small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="tutupModalTambahDanBukaModalTipeBiaya()">Batal</button>
+                        <button type="submit" class="btn-primary-custom" id="btnSimpanTipeBiaya">Simpan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- jQuery (required for DataTables) -->
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
     <!-- Bootstrap JS -->
@@ -446,6 +570,63 @@ $active_page = 'master_lokasi';
                 console.log('DataTables error suppressed:', message);
                 return false;
             });
+            
+            // Initialize DataTable untuk modal Tipe Biaya Operasional
+            var tableTipeBiaya = $('#tableTipeBiaya').DataTable({
+                language: {
+                    url: 'https://cdn.datatables.net/plug-ins/1.13.7/i18n/id.json',
+                    emptyTable: 'Tidak ada data tipe biaya operasional'
+                },
+                pageLength: 10,
+                lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
+                order: [[1, 'asc']], // Sort by Nama Tipe Biaya Operasional
+                scrollX: false,
+                autoWidth: false,
+                width: '100%',
+                columnDefs: [
+                    { width: '50%', targets: 0 },
+                    { width: '50%', targets: 1 }
+                ]
+            });
+            
+            // Handle nested modal untuk tambah tipe biaya - hanya untuk submit berhasil
+            $('#modalTambahTipeBiaya').on('hidden.bs.modal', function(e) {
+                // Hanya buka kembali modal utama jika bukan karena redirect (submit berhasil)
+                // Jika ditutup dengan batal, tidak perlu buka kembali karena sudah dihandle di fungsi tutupModalTambahDanBukaModalTipeBiaya
+                if (window.location.href.includes('success_tipe')) {
+                    setTimeout(function() {
+                        var modalTipeBiaya = new bootstrap.Modal(document.getElementById('modalTipeBiayaOperasional'));
+                        modalTipeBiaya.show();
+                    }, 100);
+                }
+            });
+            
+            // Reload table setelah berhasil tambah tipe biaya
+            <?php if (isset($_GET['success_tipe']) && $_GET['success_tipe'] == '1'): ?>
+                // Buka kembali modal lihat tipe biaya setelah redirect
+                setTimeout(function() {
+                    var modalTipeBiaya = new bootstrap.Modal(document.getElementById('modalTipeBiayaOperasional'));
+                    modalTipeBiaya.show();
+                    // Reload table dengan destroy dan reinitialize
+                    tableTipeBiaya.destroy();
+                    tableTipeBiaya = $('#tableTipeBiaya').DataTable({
+                        language: {
+                            url: 'https://cdn.datatables.net/plug-ins/1.13.7/i18n/id.json',
+                            emptyTable: 'Tidak ada data tipe biaya operasional'
+                        },
+                        pageLength: 10,
+                        lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
+                        order: [[1, 'asc']],
+                        scrollX: false,
+                        autoWidth: false,
+                        width: '100%',
+                        columnDefs: [
+                            { width: '50%', targets: 0 },
+                            { width: '50%', targets: 1 }
+                        ]
+                    });
+                }, 100);
+            <?php endif; ?>
             
             // Auto-set satuan berdasarkan tipe lokasi (pasti, tidak bisa diubah)
             $('#type_lokasi').on('change', function() {
@@ -603,14 +784,104 @@ $active_page = 'master_lokasi';
         }
         
         function lihatBiayaOperasional(kdLokasi) {
-            // TODO: Implementasi halaman biaya operasional
-            Swal.fire({
-                icon: 'info',
-                title: 'Biaya Operasional',
-                text: 'Fitur ini akan segera tersedia untuk lokasi: ' + kdLokasi,
-                confirmButtonColor: '#667eea'
-            });
+            // Redirect ke halaman lihat biaya operasional
+            window.location.href = 'lihat_biaya_operasional.php?kd_lokasi=' + encodeURIComponent(kdLokasi);
         }
+        
+        // Function untuk buka kembali modal lihat tipe biaya setelah modal tambah ditutup
+        function bukaModalTipeBiaya() {
+            var modalTipeBiaya = new bootstrap.Modal(document.getElementById('modalTipeBiayaOperasional'));
+            modalTipeBiaya.show();
+        }
+        
+        function bukaModalTambahTipeBiaya() {
+            // Tutup modal utama dulu
+            var modalTipeBiaya = bootstrap.Modal.getInstance(document.getElementById('modalTipeBiayaOperasional'));
+            if (modalTipeBiaya) {
+                modalTipeBiaya.hide();
+            }
+            
+            // Buka nested modal setelah modal utama tertutup
+            setTimeout(function() {
+                var modalTambah = new bootstrap.Modal(document.getElementById('modalTambahTipeBiaya'));
+                modalTambah.show();
+            }, 300);
+        }
+        
+        function tutupModalTambahDanBukaModalTipeBiaya() {
+            // Tutup modal tambah
+            var modalTambah = bootstrap.Modal.getInstance(document.getElementById('modalTambahTipeBiaya'));
+            if (modalTambah) {
+                modalTambah.hide();
+            }
+            
+            // Pastikan backdrop dihapus
+            setTimeout(function() {
+                // Hapus backdrop yang tersisa
+                $('.modal-backdrop').remove();
+                $('body').removeClass('modal-open');
+                $('body').css('overflow', '');
+                $('body').css('padding-right', '');
+                
+                // Buka kembali modal utama
+                var modalTipeBiaya = new bootstrap.Modal(document.getElementById('modalTipeBiayaOperasional'));
+                modalTipeBiaya.show();
+            }, 300);
+        }
+        
+        // Flag untuk mencegah multiple submission tambah tipe biaya
+        var isSubmittingTipeBiaya = false;
+        
+        // Form validation untuk tambah tipe biaya
+        $('#formTambahTipeBiaya').on('submit', function(e) {
+            if (isSubmittingTipeBiaya) {
+                e.preventDefault();
+                return false;
+            }
+            
+            var namaTipe = $('#tambah_nama_tipe_biaya').val().trim();
+            
+            if (namaTipe.length === 0) {
+                e.preventDefault();
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Peringatan!',
+                    text: 'Nama tipe biaya operasional harus diisi!',
+                    confirmButtonColor: '#667eea'
+                }).then(() => {
+                    $('#tambah_nama_tipe_biaya').focus();
+                });
+                return false;
+            }
+            
+            isSubmittingTipeBiaya = true;
+            $('#btnSimpanTipeBiaya').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan...');
+        });
+        
+        // Reset flag saat modal ditutup
+        $('#modalTambahTipeBiaya').on('hidden.bs.modal', function() {
+            isSubmittingTipeBiaya = false;
+            $('#btnSimpanTipeBiaya').prop('disabled', false).html('Simpan');
+            $('#formTambahTipeBiaya')[0].reset();
+            
+            // Pastikan backdrop dihapus jika modal ditutup
+            setTimeout(function() {
+                // Hapus backdrop ganda jika ada
+                var backdropCount = $('.modal-backdrop').length;
+                if (backdropCount > 1) {
+                    $('.modal-backdrop').not(':last').remove();
+                }
+            }, 100);
+        });
+        
+        // Handle saat modal utama ditutup - pastikan semua backdrop dihapus
+        $('#modalTipeBiayaOperasional').on('hidden.bs.modal', function() {
+            // Hapus semua backdrop yang tersisa
+            $('.modal-backdrop').remove();
+            $('body').removeClass('modal-open');
+            $('body').css('overflow', '');
+            $('body').css('padding-right', '');
+        });
         
         // Form validation dan prevent multiple submission untuk edit
         $('#formEditLokasi').on('submit', function(e) {

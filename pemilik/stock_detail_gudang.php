@@ -40,6 +40,23 @@ if (isset($_GET['get_stock_data']) && $_GET['get_stock_data'] == '1') {
     $kd_lokasi_ajax = isset($_GET['kd_lokasi']) ? trim($_GET['kd_lokasi']) : '';
     
     if (!empty($kd_barang_ajax) && !empty($kd_lokasi_ajax)) {
+        // Query untuk mendapatkan data barang lengkap
+        $query_barang_ajax = "SELECT 
+            mb.KD_BARANG,
+            mb.NAMA_BARANG,
+            mb.BERAT,
+            mb.STATUS as STATUS_BARANG,
+            COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
+            COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI
+        FROM MASTER_BARANG mb
+        LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
+        LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
+        WHERE mb.KD_BARANG = ?";
+        $stmt_barang_ajax = $conn->prepare($query_barang_ajax);
+        $stmt_barang_ajax->bind_param("s", $kd_barang_ajax);
+        $stmt_barang_ajax->execute();
+        $result_barang_ajax = $stmt_barang_ajax->get_result();
+        
         // Query untuk mendapatkan stock data
         $query_stock_ajax = "SELECT JUMLAH_MAX_STOCK, JUMLAH_BARANG 
                             FROM STOCK 
@@ -49,27 +66,51 @@ if (isset($_GET['get_stock_data']) && $_GET['get_stock_data'] == '1') {
         $stmt_stock_ajax->execute();
         $result_stock_ajax = $stmt_stock_ajax->get_result();
         
-        // Query untuk mendapatkan supplier terakhir
-        $query_supplier_last = "SELECT KD_SUPPLIER 
-                               FROM PESAN_BARANG 
-                               WHERE KD_BARANG = ? AND KD_LOKASI = ? AND KD_SUPPLIER IS NOT NULL 
-                               ORDER BY WAKTU_PESAN DESC 
+        // Query untuk mendapatkan supplier terakhir dengan data lengkap
+        $query_supplier_last = "SELECT pb.KD_SUPPLIER, 
+                                       COALESCE(ms.KD_SUPPLIER, '-') as SUPPLIER_KD,
+                                       COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER,
+                                       COALESCE(ms.ALAMAT_SUPPLIER, '-') as ALAMAT_SUPPLIER
+                               FROM PESAN_BARANG pb
+                               LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
+                               WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.KD_SUPPLIER IS NOT NULL 
+                               ORDER BY pb.WAKTU_PESAN DESC 
                                LIMIT 1";
         $stmt_supplier_last = $conn->prepare($query_supplier_last);
         $stmt_supplier_last->bind_param("ss", $kd_barang_ajax, $kd_lokasi_ajax);
         $stmt_supplier_last->execute();
         $result_supplier_last = $stmt_supplier_last->get_result();
-        $last_supplier = $result_supplier_last->num_rows > 0 ? $result_supplier_last->fetch_assoc()['KD_SUPPLIER'] : null;
+        $last_supplier_data = $result_supplier_last->num_rows > 0 ? $result_supplier_last->fetch_assoc() : null;
+        $last_supplier = $last_supplier_data ? $last_supplier_data['KD_SUPPLIER'] : null;
         
-        if ($result_stock_ajax->num_rows > 0) {
+        if ($result_stock_ajax->num_rows > 0 && $result_barang_ajax->num_rows > 0) {
             $stock_data = $result_stock_ajax->fetch_assoc();
+            $barang_data = $result_barang_ajax->fetch_assoc();
             header('Content-Type: application/json');
+            
             echo json_encode([
                 'success' => true,
-                'stock_max' => $stock_data['JUMLAH_MAX_STOCK'],
-                'stock_sekarang' => $stock_data['JUMLAH_BARANG'],
-                'last_supplier' => $last_supplier
+                'kd_barang' => $barang_data['KD_BARANG'] ?? '',
+                'nama_barang' => $barang_data['NAMA_BARANG'] ?? '',
+                'merek_barang' => $barang_data['NAMA_MEREK'] ?? '-',
+                'kategori_barang' => $barang_data['NAMA_KATEGORI'] ?? '-',
+                'berat_barang' => $barang_data['BERAT'] ?? 0,
+                'status_barang' => ($barang_data['STATUS_BARANG'] ?? '') == 'AKTIF' ? 'Aktif' : 'Tidak Aktif',
+                'stock_max' => $stock_data['JUMLAH_MAX_STOCK'] ?? 0,
+                'stock_sekarang' => $stock_data['JUMLAH_BARANG'] ?? 0,
+                'last_supplier' => $last_supplier ?? null
             ]);
+            exit();
+        } else {
+            header('Content-Type: application/json');
+            $error_msg = 'Data tidak ditemukan. ';
+            if ($result_stock_ajax->num_rows == 0) {
+                $error_msg .= 'Stock tidak ditemukan. ';
+            }
+            if ($result_barang_ajax->num_rows == 0) {
+                $error_msg .= 'Barang tidak ditemukan.';
+            }
+            echo json_encode(['success' => false, 'message' => $error_msg]);
             exit();
         }
     }
@@ -439,9 +480,37 @@ $active_page = 'stock';
                         <input type="hidden" name="kd_barang" id="pesan_kd_barang">
                         <input type="hidden" name="kd_lokasi" id="pesan_kd_lokasi">
                         
-                        <div class="mb-3">
+                        <!-- Item Details Section -->
+                        <div class="row mb-2">
+                            <div class="col-md-6 mb-2">
+                                <label class="form-label fw-bold">Kode Barang</label>
+                                <input type="text" class="form-control form-control-sm" id="pesan_kd_barang_display" readonly style="background-color: #e9ecef;">
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label class="form-label fw-bold">Merek Barang</label>
+                                <input type="text" class="form-control form-control-sm" id="pesan_merek_barang" readonly style="background-color: #e9ecef;">
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label class="form-label fw-bold">Kategori Barang</label>
+                                <input type="text" class="form-control form-control-sm" id="pesan_kategori_barang" readonly style="background-color: #e9ecef;">
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label class="form-label fw-bold">Berat Barang (gr)</label>
+                                <input type="text" class="form-control form-control-sm" id="pesan_berat_barang" readonly style="background-color: #e9ecef;">
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label class="form-label fw-bold">Nama Barang</label>
+                                <input type="text" class="form-control form-control-sm" id="pesan_nama_barang" readonly style="background-color: #e9ecef;">
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label class="form-label fw-bold">Status Barang</label>
+                                <input type="text" class="form-control form-control-sm" id="pesan_status_barang" readonly style="background-color: #e9ecef;">
+                            </div>
+                        </div>
+                        
+                        <div class="mb-2">
                             <label for="pesan_supplier" class="form-label">Supplier <span class="text-danger">*</span></label>
-                            <select class="form-select" id="pesan_supplier" name="kd_supplier" required>
+                            <select class="form-select form-select-sm" id="pesan_supplier" name="kd_supplier" required>
                                 <option value="">-- Pilih Supplier --</option>
                                 <?php 
                                 // Reset result pointer untuk supplier
@@ -451,33 +520,34 @@ $active_page = 'stock';
                                         $alamat_display = !empty($supplier['ALAMAT_SUPPLIER']) ? ' - ' . htmlspecialchars($supplier['ALAMAT_SUPPLIER']) : '';
                                     ?>
                                         <option value="<?php echo htmlspecialchars($supplier['KD_SUPPLIER']); ?>" 
-                                                data-alamat="<?php echo htmlspecialchars($supplier['ALAMAT_SUPPLIER'] ?? ''); ?>"
-                                                data-is-last="false">
+                                                data-alamat="<?php echo htmlspecialchars($supplier['ALAMAT_SUPPLIER'] ?? ''); ?>">
                                             <?php echo htmlspecialchars($supplier['KD_SUPPLIER'] . ' - ' . $supplier['NAMA_SUPPLIER'] . $alamat_display); ?>
                                         </option>
                                     <?php endwhile;
                                 } ?>
                             </select>
-                            <small class="text-muted" id="supplier_alamat_display"></small>
                         </div>
                         
-                        <div class="mb-3">
-                            <label for="pesan_stock_max" class="form-label">Stock maksimal (dus)</label>
-                            <input type="number" class="form-control" id="pesan_stock_max" readonly style="background-color: #e9ecef;" disabled>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="pesan_stock_sekarang" class="form-label">Stock Saat Ini (dus)</label>
-                            <input type="number" class="form-control" id="pesan_stock_sekarang" readonly style="background-color: #e9ecef;" disabled>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="pesan_stock_dipesan" class="form-label">Stock yg dipesan (dus) <span class="text-danger">*</span></label>
-                            <div class="input-group">
-                                <input type="number" class="form-control" id="pesan_stock_dipesan" name="jumlah_dipesan" placeholder="0" min="0" required>
-                                <button type="button" class="btn btn-outline-secondary" onclick="setMaxStock()">Max</button>
+                        <div class="row mb-2">
+                            <div class="col-md-6 mb-2">
+                                <label for="pesan_stock_max" class="form-label">Stock maksimal (dus)</label>
+                                <input type="number" class="form-control form-control-sm" id="pesan_stock_max" readonly style="background-color: #e9ecef;" disabled>
                             </div>
-                            <small class="text-muted">Jumlah stock yang akan dipesan.</small>
+                            <div class="col-md-6 mb-2">
+                                <label for="pesan_stock_sekarang" class="form-label">Stock Saat Ini (dus)</label>
+                                <input type="number" class="form-control form-control-sm" id="pesan_stock_sekarang" readonly style="background-color: #e9ecef;" disabled>
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label for="pesan_stock_dipesan" class="form-label">Stock yg dipesan (dus) <span class="text-danger">*</span></label>
+                                <div class="input-group input-group-sm">
+                                    <input type="number" class="form-control" id="pesan_stock_dipesan" name="jumlah_dipesan" placeholder="0" min="0" required>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="setMaxStock()">Max</button>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-2">
+                                <label for="pesan_stock_setelah_dipesan" class="form-label">Stock Setelah Dipesan (dus)</label>
+                                <input type="number" class="form-control form-control-sm" id="pesan_stock_setelah_dipesan" readonly style="background-color: #e9ecef;" disabled>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -570,30 +640,27 @@ $active_page = 'stock';
                 $('#setting_pilih_barang').val('').trigger('change');
             });
             
-            // Handle perubahan pilihan supplier di modal pesan manual
-            $('#pesan_supplier').on('change', function() {
-                var selectedOption = $(this).find('option:selected');
-                var alamat = selectedOption.data('alamat') || '';
-                
-                if (alamat) {
-                    $('#supplier_alamat_display').text('Alamat: ' + alamat);
-                } else {
-                    $('#supplier_alamat_display').text('');
-                }
+            // Handle perubahan stock dipesan untuk menghitung stock setelah dipesan
+            $('#pesan_stock_dipesan').on('input change', function() {
+                calculateStockAfterOrder();
             });
             
-            // Reset alamat display dan tanda supplier terakhir saat modal ditutup
+            // Reset form saat modal ditutup
             $('#modalPesanManual').on('hidden.bs.modal', function() {
-                $('#supplier_alamat_display').text('');
-                // Reset tanda supplier terakhir
+                // Reset supplier dropdown format
                 $('#pesan_supplier option').each(function() {
-                    $(this).removeAttr('data-is-last');
                     var optionText = $(this).text();
-                    if (optionText.includes('(Pesan Terakhir)')) {
-                        $(this).text(optionText.replace(' (Pesan Terakhir)', ''));
+                    if (optionText.includes('(Pesan Terakhir) - ')) {
+                        $(this).text(optionText.replace('(Pesan Terakhir) - ', ''));
                     }
                 });
                 $('#pesan_supplier').val('');
+                $('#pesan_kd_barang_display').val('');
+                $('#pesan_merek_barang').val('');
+                $('#pesan_kategori_barang').val('');
+                $('#pesan_berat_barang').val('');
+                $('#pesan_nama_barang').val('');
+                $('#pesan_status_barang').val('');
             });
         });
         
@@ -711,35 +778,54 @@ $active_page = 'stock';
                 dataType: 'json',
                 success: function(response) {
                     if (response.success) {
+                        // Set hidden fields
                         $('#pesan_kd_barang').val(kdBarang);
                         $('#pesan_kd_lokasi').val(kdLokasi);
+                        
+                        // Set item details (read-only)
+                        $('#pesan_kd_barang_display').val(response.kd_barang || '');
+                        $('#pesan_merek_barang').val(response.merek_barang || '-');
+                        $('#pesan_kategori_barang').val(response.kategori_barang || '-');
+                        var beratFormatted = response.berat_barang ? parseInt(response.berat_barang).toLocaleString('id-ID') : '';
+                        $('#pesan_berat_barang').val(beratFormatted);
+                        $('#pesan_nama_barang').val(response.nama_barang || '');
+                        $('#pesan_status_barang').val(response.status_barang || '');
+                        
+                        // Set stock fields
                         $('#pesan_stock_max').val(response.stock_max);
                         $('#pesan_stock_sekarang').val(response.stock_sekarang);
                         $('#pesan_stock_dipesan').val(0);
                         
-                        // Reset tanda supplier terakhir
+                        // Set supplier terakhir jika ada dan update format display
+                        var lastSupplierKd = response.last_supplier || null;
+                        
+                        // Update format semua option supplier
                         $('#pesan_supplier option').each(function() {
-                            $(this).removeAttr('data-is-last');
-                            var optionText = $(this).text();
-                            // Hapus badge jika ada
-                            if (optionText.includes('(Pesan Terakhir)')) {
-                                $(this).text(optionText.replace(' (Pesan Terakhir)', ''));
+                            var optionValue = $(this).val();
+                            var originalText = $(this).text();
+                            
+                            // Hapus prefix "(Pesan Terakhir) - " jika ada
+                            if (originalText.includes('(Pesan Terakhir) - ')) {
+                                originalText = originalText.replace('(Pesan Terakhir) - ', '');
+                            }
+                            
+                            // Jika ini supplier terakhir, tambahkan prefix
+                            if (optionValue && optionValue === lastSupplierKd) {
+                                $(this).text('(Pesan Terakhir) - ' + originalText);
+                            } else {
+                                $(this).text(originalText);
                             }
                         });
                         
-                        // Tandai dan auto-select supplier terakhir jika ada
-                        if (response.last_supplier) {
-                            var $lastSupplierOption = $('#pesan_supplier option[value="' + response.last_supplier + '"]');
-                            if ($lastSupplierOption.length > 0) {
-                                var originalText = $lastSupplierOption.text();
-                                $lastSupplierOption.attr('data-is-last', 'true');
-                                $lastSupplierOption.text(originalText + ' (Pesan Terakhir)');
-                                $lastSupplierOption.prop('selected', true);
-                                
-                                // Trigger change untuk menampilkan alamat
-                                $('#pesan_supplier').trigger('change');
-                            }
+                        // Auto-select supplier terakhir jika ada
+                        if (lastSupplierKd) {
+                            $('#pesan_supplier').val(lastSupplierKd);
+                        } else {
+                            $('#pesan_supplier').val('');
                         }
+                        
+                        // Hitung stock setelah dipesan
+                        calculateStockAfterOrder();
                         
                         $('#modalPesanManual').modal('show');
                     } else {
@@ -751,11 +837,13 @@ $active_page = 'stock';
                         });
                     }
                 },
-                error: function() {
+                error: function(xhr, status, error) {
+                    console.error('AJAX Error:', error);
+                    console.error('Response:', xhr.responseText);
                     Swal.fire({
                         icon: 'error',
                         title: 'Error!',
-                        text: 'Terjadi kesalahan saat mengambil data!',
+                        text: 'Terjadi kesalahan saat mengambil data! ' + error,
                         confirmButtonColor: '#e74c3c'
                     });
                 }
@@ -772,6 +860,15 @@ $active_page = 'stock';
             }
             
             $('#pesan_stock_dipesan').val(stockDipesan);
+            calculateStockAfterOrder();
+        }
+        
+        function calculateStockAfterOrder() {
+            var stockSekarang = parseInt($('#pesan_stock_sekarang').val()) || 0;
+            var stockDipesan = parseInt($('#pesan_stock_dipesan').val()) || 0;
+            var stockSetelahDipesan = stockSekarang + stockDipesan;
+            
+            $('#pesan_stock_setelah_dipesan').val(stockSetelahDipesan);
         }
         
         // Flag untuk mencegah multiple submission - Pesan Manual

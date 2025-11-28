@@ -186,11 +186,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         // JUMLAH_TIBA_DUS = jumlah yang tiba (jumlah_dikirim, termasuk yang ditolak)
         $jumlah_tiba_dus = $jumlah_dikirim;
         
-        // Update status PESAN_BARANG menjadi SELESAI dan set WAKTU_SAMPAI, HARGA_PESAN_BARANG_DUS, BIAYA_PENGIRIMAAN, dan SISA_STOCK_DUS
+        // Update status PESAN_BARANG menjadi SELESAI dan set WAKTU_SELESAI, HARGA_PESAN_BARANG_DUS, BIAYA_PENGIRIMAAN, dan SISA_STOCK_DUS
         if (!empty($tgl_expired)) {
             $update_pesan = "UPDATE PESAN_BARANG 
                             SET STATUS = 'SELESAI', 
-                                WAKTU_SAMPAI = CURRENT_TIMESTAMP,
+                                WAKTU_SELESAI = CURRENT_TIMESTAMP,
                                 JUMLAH_TIBA_DUS = ?,
                                 TOTAL_MASUK_DUS = ?,
                                 JUMLAH_DITOLAK_DUS = ?,
@@ -207,7 +207,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         } else {
             $update_pesan = "UPDATE PESAN_BARANG 
                             SET STATUS = 'SELESAI', 
-                                WAKTU_SAMPAI = CURRENT_TIMESTAMP,
+                                WAKTU_SELESAI = CURRENT_TIMESTAMP,
                                 JUMLAH_TIBA_DUS = ?,
                                 TOTAL_MASUK_DUS = ?,
                                 JUMLAH_DITOLAK_DUS = ?,
@@ -367,8 +367,8 @@ $query_barang_masuk = "SELECT
     pb.TOTAL_MASUK_DUS,
     pb.JUMLAH_DITOLAK_DUS,
     pb.WAKTU_PESAN,
-    pb.WAKTU_ESTIMASI_SAMPAI,
-    pb.WAKTU_SAMPAI,
+    pb.WAKTU_ESTIMASI_SELESAI,
+    pb.WAKTU_SELESAI,
     pb.STATUS,
     mb.NAMA_BARANG,
     mb.BERAT,
@@ -418,7 +418,7 @@ function formatWaktuStack($waktu_pesan, $waktu_estimasi, $waktu_sampai, $status)
     
     $html = '<div class="d-flex flex-column gap-1">';
     
-    // Waktu diterima (jika ada WAKTU_SAMPAI dan status SELESAI) - tampilkan di atas
+    // Waktu diterima (jika ada WAKTU_SELESAI dan status SELESAI) - tampilkan di atas
     if (!empty($waktu_sampai) && $status == 'SELESAI') {
         $date_sampai = new DateTime($waktu_sampai);
         $tanggal_sampai = $date_sampai->format('d') . ' ' . $bulan[(int)$date_sampai->format('m')] . ' ' . $date_sampai->format('Y');
@@ -528,7 +528,7 @@ $active_page = 'barang_masuk';
                                         echo $supplier_display;
                                         ?>
                                     </td>
-                                    <td><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_ESTIMASI_SAMPAI'], $row['WAKTU_SAMPAI'], $row['STATUS']); ?></td>
+                                    <td><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_ESTIMASI_SELESAI'], $row['WAKTU_SELESAI'], $row['STATUS']); ?></td>
                                     <td><?php echo htmlspecialchars($row['KD_BARANG']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>

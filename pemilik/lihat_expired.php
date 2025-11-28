@@ -56,10 +56,11 @@ $query_expired = "SELECT
     pb.TGL_EXPIRED,
     pb.SISA_STOCK_DUS,
     pb.TOTAL_MASUK_DUS,
-    pb.WAKTU_SAMPAI,
+    pb.WAKTU_SELESAI,
     pb.HARGA_PESAN_BARANG_DUS,
     COALESCE(ms.KD_SUPPLIER, '-') as SUPPLIER_KD,
     COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER,
+    COALESCE(ms.ALAMAT_SUPPLIER, '-') as ALAMAT_SUPPLIER,
     CASE 
         WHEN pb.TGL_EXPIRED IS NULL THEN 999
         WHEN pb.TGL_EXPIRED < CURDATE() THEN 1
@@ -163,12 +164,12 @@ $active_page = 'stock';
                         <input type="text" class="form-control" value="<?php echo htmlspecialchars($barang['NAMA_KATEGORI']); ?>" readonly style="background-color: #e9ecef;">
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label class="form-label fw-bold">Nama Barang</label>
-                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($barang['NAMA_BARANG']); ?>" readonly style="background-color: #e9ecef;">
+                        <label class="form-label fw-bold">Berat Barang (gr)</label>
+                        <input type="text" class="form-control" value="<?php echo number_format($barang['BERAT'], 0, ',', '.'); ?>" readonly style="background-color: #e9ecef;">
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label class="form-label fw-bold">Berat (gr)</label>
-                        <input type="text" class="form-control" value="<?php echo number_format($barang['BERAT'], 0, ',', '.'); ?>" readonly style="background-color: #e9ecef;">
+                        <label class="form-label fw-bold">Nama Barang</label>
+                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($barang['NAMA_BARANG']); ?>" readonly style="background-color: #e9ecef;">
                     </div>
                     <div class="col-md-6 mb-3">
                         <label class="form-label fw-bold">Status Barang</label>
@@ -184,7 +185,7 @@ $active_page = 'stock';
                 <table id="tableExpired" class="table table-custom table-striped table-hover">
                     <thead>
                         <tr>
-                            <th>ID Pesan Barang</th>
+                            <th>ID PESAN</th>
                             <th>Supplier</th>
                             <th>Tanggal Expired</th>
                             <th>Sisa Stock (dus)</th>
@@ -222,6 +223,9 @@ $active_page = 'stock';
                                 $supplier_display = '';
                                 if ($row['SUPPLIER_KD'] != '-' && $row['NAMA_SUPPLIER'] != '-') {
                                     $supplier_display = htmlspecialchars($row['SUPPLIER_KD'] . ' - ' . $row['NAMA_SUPPLIER']);
+                                    if ($row['ALAMAT_SUPPLIER'] != '-') {
+                                        $supplier_display .= ' - ' . htmlspecialchars($row['ALAMAT_SUPPLIER']);
+                                    }
                                 } else {
                                     $supplier_display = '-';
                                 }
@@ -233,7 +237,7 @@ $active_page = 'stock';
                                     <td><?php echo number_format($row['SISA_STOCK_DUS'], 0, ',', '.'); ?></td>
                                     <td><?php echo number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.'); ?></td>
                                     <td><?php echo formatRupiah($row['HARGA_PESAN_BARANG_DUS']); ?></td>
-                                    <td><?php echo formatTanggalWaktu($row['WAKTU_SAMPAI']); ?></td>
+                                    <td><?php echo formatTanggalWaktu($row['WAKTU_SELESAI']); ?></td>
                                     <td>
                                         <span class="badge bg-<?php echo $badge_class; ?>"><?php echo $status_expired; ?></span>
                                     </td>

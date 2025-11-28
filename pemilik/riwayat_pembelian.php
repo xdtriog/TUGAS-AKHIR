@@ -26,9 +26,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     $update_stmt->bind_param("ss", $status_baru, $id_pesan);
     
     if ($update_stmt->execute()) {
-        // Jika status diubah menjadi DIKIRIM, update WAKTU_SAMPAI
+        // Jika status diubah menjadi DIKIRIM, update WAKTU_SELESAI
         if ($status_baru == 'DIKIRIM') {
-            $update_waktu = "UPDATE PESAN_BARANG SET WAKTU_SAMPAI = CURRENT_TIMESTAMP WHERE ID_PESAN_BARANG = ?";
+            $update_waktu = "UPDATE PESAN_BARANG SET WAKTU_SELESAI = CURRENT_TIMESTAMP WHERE ID_PESAN_BARANG = ?";
             $update_waktu_stmt = $conn->prepare($update_waktu);
             $update_waktu_stmt->bind_param("s", $id_pesan);
             $update_waktu_stmt->execute();
@@ -99,20 +99,19 @@ $query_riwayat = "SELECT
     pb.HARGA_PESAN_BARANG_DUS,
     pb.BIAYA_PENGIRIMAAN,
     pb.TOTAL_MASUK_DUS,
+    pb.JUMLAH_TIBA_DUS,
     pb.JUMLAH_DITOLAK_DUS,
     pb.WAKTU_PESAN,
-    pb.WAKTU_ESTIMASI_SAMPAI,
-    pb.WAKTU_SAMPAI,
+    pb.WAKTU_ESTIMASI_SELESAI,
+    pb.WAKTU_SELESAI,
     pb.STATUS,
     ml.NAMA_LOKASI,
     COALESCE(ms.KD_SUPPLIER, '-') as SUPPLIER_KD,
     COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER,
-    COALESCE(ms.ALAMAT_SUPPLIER, '-') as ALAMAT_SUPPLIER,
-    s.SATUAN
+    COALESCE(ms.ALAMAT_SUPPLIER, '-') as ALAMAT_SUPPLIER
 FROM PESAN_BARANG pb
 LEFT JOIN MASTER_LOKASI ml ON pb.KD_LOKASI = ml.KD_LOKASI
 LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
-LEFT JOIN STOCK s ON pb.KD_BARANG = s.KD_BARANG AND pb.KD_LOKASI = s.KD_LOKASI
 WHERE pb.KD_BARANG = ?
 ORDER BY pb.WAKTU_PESAN DESC";
 $stmt_riwayat = $conn->prepare($query_riwayat);
@@ -147,7 +146,7 @@ function formatWaktuStack($waktu_pesan, $waktu_estimasi, $waktu_sampai, $status)
     
     $html = '<div class="d-flex flex-column gap-1">';
     
-    // Waktu diterima (jika ada WAKTU_SAMPAI dan status SELESAI) - tampilkan di atas
+    // Waktu diterima (jika ada WAKTU_SELESAI dan status SELESAI) - tampilkan di atas
     if (!empty($waktu_sampai) && $status == 'SELESAI') {
         $date_sampai = new DateTime($waktu_sampai);
         $tanggal_sampai = $date_sampai->format('d') . ' ' . $bulan[(int)$date_sampai->format('m')] . ' ' . $date_sampai->format('Y');
@@ -245,9 +244,13 @@ $active_page = 'stock';
                         <label class="form-label fw-bold">Berat Barang (gr)</label>
                         <input type="text" class="form-control" value="<?php echo number_format($barang['BERAT'], 0, ',', '.'); ?>" readonly style="background-color: #e9ecef;">
                     </div>
-                    <div class="col-md-12 mb-3">
+                    <div class="col-md-6 mb-3">
                         <label class="form-label fw-bold">Nama Barang</label>
                         <input type="text" class="form-control" value="<?php echo htmlspecialchars($barang['NAMA_BARANG']); ?>" readonly style="background-color: #e9ecef;">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Status Barang</label>
+                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($barang['STATUS_BARANG'] == 'AKTIF' ? 'Aktif' : 'Tidak Aktif'); ?>" readonly style="background-color: #e9ecef;">
                     </div>
                 </div>
             </div>
@@ -262,10 +265,10 @@ $active_page = 'stock';
                             <th>ID PESAN</th>
                             <th>Supplier</th>
                             <th>Waktu</th>
-                            <th>Jumlah Pemesanan</th>
-                            <th>Total Masuk</th>
-                            <th>Jumlah Ditolak</th>
-                            <th>Satuan</th>
+                            <th>Jumlah Pesan (dus)</th>
+                            <th>Total Masuk (dus)</th>
+                            <th>Jumlah Tiba (dus)</th>
+                            <th>Jumlah Ditolak (dus)</th>
                             <th>Harga Beli</th>
                             <th>Total Bayar</th>
                             <th>Biaya Pengiriman</th>
@@ -292,11 +295,11 @@ $active_page = 'stock';
                                         echo $supplier_display;
                                         ?>
                                     </td>
-                                    <td><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_ESTIMASI_SAMPAI'], $row['WAKTU_SAMPAI'], $row['STATUS']); ?></td>
+                                    <td><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_ESTIMASI_SELESAI'], $row['WAKTU_SELESAI'], $row['STATUS']); ?></td>
                                     <td><?php echo $row['JUMLAH_PESAN_BARANG_DUS'] ? number_format($row['JUMLAH_PESAN_BARANG_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['TOTAL_MASUK_DUS'] ? number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.') : '-'; ?></td>
+                                    <td><?php echo $row['JUMLAH_TIBA_DUS'] ? number_format($row['JUMLAH_TIBA_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['JUMLAH_DITOLAK_DUS'] ? number_format($row['JUMLAH_DITOLAK_DUS'], 0, ',', '.') : '-'; ?></td>
-                                    <td><?php echo htmlspecialchars($row['SATUAN'] ?? 'Dus'); ?></td>
                                     <td><?php echo formatRupiah($row['HARGA_PESAN_BARANG_DUS']); ?></td>
                                     <td><?php 
                                         $total_bayar = 0;
