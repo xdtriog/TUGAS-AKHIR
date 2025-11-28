@@ -355,6 +355,7 @@ $active_page = 'stock';
                                     <td>
                                         <div class="d-flex flex-column gap-1">
                                             <button class="btn-view btn-sm" onclick="lihatRiwayatPembelian('<?php echo htmlspecialchars($row['KD_BARANG']); ?>')">Lihat Riwayat Pembelian</button>
+                                            <button class="btn-view btn-sm" onclick="lihatExpired('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Lihat Expired</button>
                                             <?php if ($row['STATUS_BARANG'] == 'AKTIF'): ?>
                                                 <button class="btn-view btn-sm" onclick="hitungPOQ('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Hitung POQ</button>
                                                 <button class="btn-view btn-sm" onclick="pesanManual('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Pesan Manual</button>
@@ -674,6 +675,21 @@ $active_page = 'stock';
             }
             // Gunakan path relatif dari folder pemilik
             var url = 'riwayat_pembelian.php?kd_barang=' + encodeURIComponent(kdBarang);
+            window.location.href = url;
+        }
+
+        function lihatExpired(kdBarang, kdLokasi) {
+            // Redirect ke halaman lihat expired
+            if (!kdBarang || kdBarang.trim() === '') {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error!',
+                    text: 'Kode barang tidak valid!',
+                    confirmButtonColor: '#e74c3c'
+                });
+                return;
+            }
+            var url = 'lihat_expired.php?kd_barang=' + encodeURIComponent(kdBarang) + '&kd_lokasi=' + encodeURIComponent(kdLokasi);
             window.location.href = url;
         }
 

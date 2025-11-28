@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_transfer_data'])) {
         exit();
     }
     
-    // Get data transfer lengkap
+    // Get data transfer lengkap dengan batch
     $query_transfer_data = "SELECT 
         tb.ID_TRANSFER_BARANG,
         ml_tujuan.KD_LOKASI as KD_LOKASI_TUJUAN,
@@ -62,19 +62,26 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_transfer_data'])) {
         ml_tujuan.ALAMAT_LOKASI as ALAMAT_LOKASI_TUJUAN,
         dtb.ID_DETAIL_TRANSFER_BARANG,
         dtb.KD_BARANG,
-        dtb.JUMLAH_PESAN_TRANSFER_DUS,
+        dtb.TOTAL_PESAN_TRANSFER_DUS,
         mb.NAMA_BARANG,
         mb.BERAT,
         COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
-        COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI
+        COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
+        dtbb.ID_DETAIL_TRANSFER_BARANG_BATCH,
+        dtbb.ID_PESAN_BARANG,
+        dtbb.JUMLAH_PESAN_TRANSFER_BATCH_DUS as JUMLAH_DUS_BATCH,
+        pb.TGL_EXPIRED,
+        pb.SISA_STOCK_DUS
     FROM TRANSFER_BARANG tb
     INNER JOIN DETAIL_TRANSFER_BARANG dtb ON tb.ID_TRANSFER_BARANG = dtb.ID_TRANSFER_BARANG
     INNER JOIN MASTER_BARANG mb ON dtb.KD_BARANG = mb.KD_BARANG
     LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
     LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
     LEFT JOIN MASTER_LOKASI ml_tujuan ON tb.KD_LOKASI_TUJUAN = ml_tujuan.KD_LOKASI
+    LEFT JOIN DETAIL_TRANSFER_BARANG_BATCH dtbb ON dtb.ID_DETAIL_TRANSFER_BARANG = dtbb.ID_DETAIL_TRANSFER_BARANG
+    LEFT JOIN PESAN_BARANG pb ON dtbb.ID_PESAN_BARANG = pb.ID_PESAN_BARANG
     WHERE tb.ID_TRANSFER_BARANG = ? AND tb.KD_LOKASI_ASAL = ? AND tb.STATUS = 'DIPESAN' AND dtb.STATUS = 'DIPESAN'
-    ORDER BY dtb.ID_DETAIL_TRANSFER_BARANG ASC";
+    ORDER BY dtb.ID_DETAIL_TRANSFER_BARANG ASC, pb.TGL_EXPIRED ASC";
     
     $stmt_transfer_data = $conn->prepare($query_transfer_data);
     if (!$stmt_transfer_data) {
@@ -95,6 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_transfer_data'])) {
     
     $transfer_info = null;
     $detail_data = [];
+    $detail_map = []; // Untuk mengelompokkan batch per detail
     
     while ($row = $result_transfer_data->fetch_assoc()) {
         if ($transfer_info === null) {
@@ -106,16 +114,49 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_transfer_data'])) {
             ];
         }
         
-        $detail_data[] = [
-            'id_detail_transfer' => $row['ID_DETAIL_TRANSFER_BARANG'],
-            'kd_barang' => $row['KD_BARANG'],
-            'nama_barang' => $row['NAMA_BARANG'],
-            'nama_merek' => $row['NAMA_MEREK'],
-            'nama_kategori' => $row['NAMA_KATEGORI'],
-            'berat' => $row['BERAT'],
-            'jumlah_pesan_dus' => $row['JUMLAH_PESAN_TRANSFER_DUS']
-        ];
+        $id_detail = $row['ID_DETAIL_TRANSFER_BARANG'];
+        
+        // Jika detail belum ada, buat entry baru
+        if (!isset($detail_map[$id_detail])) {
+            $detail_map[$id_detail] = [
+                'id_detail_transfer' => $id_detail,
+                'kd_barang' => $row['KD_BARANG'],
+                'nama_barang' => $row['NAMA_BARANG'],
+                'nama_merek' => $row['NAMA_MEREK'],
+                'nama_kategori' => $row['NAMA_KATEGORI'],
+                'berat' => $row['BERAT'],
+                'jumlah_pesan_dus' => $row['TOTAL_PESAN_TRANSFER_DUS'],
+                'batches' => []
+            ];
+        }
+        
+        // Tambahkan batch jika ada
+        if (!empty($row['ID_DETAIL_TRANSFER_BARANG_BATCH']) && !empty($row['ID_PESAN_BARANG'])) {
+            // Format tanggal expired
+            $tgl_expired_display = '-';
+            if (!empty($row['TGL_EXPIRED'])) {
+                $date_expired = new DateTime($row['TGL_EXPIRED']);
+                $bulan = [
+                    1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
+                    5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
+                    9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
+                ];
+                $tgl_expired_display = $date_expired->format('d') . ' ' . $bulan[(int)$date_expired->format('m')] . ' ' . $date_expired->format('Y');
+            }
+            
+            $detail_map[$id_detail]['batches'][] = [
+                'id_detail_transfer_batch' => $row['ID_DETAIL_TRANSFER_BARANG_BATCH'],
+                'id_pesan_barang' => $row['ID_PESAN_BARANG'],
+                'jumlah_dus' => intval($row['JUMLAH_DUS_BATCH'] ?? 0),
+                'tgl_expired' => $row['TGL_EXPIRED'],
+                'tgl_expired_display' => $tgl_expired_display,
+                'sisa_stock_dus' => intval($row['SISA_STOCK_DUS'] ?? 0)
+            ];
+        }
     }
+    
+    // Convert map ke array
+    $detail_data = array_values($detail_map);
     
     echo json_encode([
         'success' => true,
@@ -130,14 +171,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     header('Content-Type: application/json');
     
     $id_transfer = isset($_POST['id_transfer']) ? trim($_POST['id_transfer']) : '';
-    $detail_kirim = isset($_POST['detail_kirim']) ? $_POST['detail_kirim'] : [];
+    $batch_kirim = isset($_POST['batch_kirim']) ? $_POST['batch_kirim'] : [];
     
-    if (empty($id_transfer) || !is_array($detail_kirim)) {
+    if (empty($id_transfer) || !is_array($batch_kirim)) {
         echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
         exit();
     }
     
-    // Boleh kosong karena bisa saja semua detail 0 (tidak dikirim)
+    // Boleh kosong karena bisa saja semua batch 0 (tidak dikirim)
     
     // Mulai transaksi
     $conn->begin_transaction();
@@ -165,24 +206,181 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             $all_detail_ids[] = $row['ID_DETAIL_TRANSFER_BARANG'];
         }
         
-        // Kumpulkan ID detail yang dikirim (jumlah > 0)
+        // Kelompokkan batch per detail transfer
+        $detail_batch_map = [];
+        foreach ($batch_kirim as $batch) {
+            $id_detail = $batch['id_detail_transfer'] ?? '';
+            if (empty($id_detail)) {
+                continue;
+            }
+            
+            if (!isset($detail_batch_map[$id_detail])) {
+                $detail_batch_map[$id_detail] = [];
+            }
+            
+            $detail_batch_map[$id_detail][] = $batch;
+        }
+        
+        // Kumpulkan ID detail yang dikirim (total > 0)
         $detail_kirim_ids = [];
         $total_detail_kirim = 0;
         
-        // Update setiap detail transfer
-        foreach ($detail_kirim as $detail) {
-            $id_detail = $detail['id_detail_transfer'] ?? '';
-            $jumlah_kirim_dus = intval($detail['jumlah_kirim_dus'] ?? 0);
-            $kd_barang = $detail['kd_barang'] ?? '';
-            
-            if (empty($id_detail) || empty($kd_barang)) {
-                continue; // Skip invalid data
+        // Update setiap detail transfer berdasarkan total batch
+        foreach ($detail_batch_map as $id_detail => $batches) {
+            // Hitung total kirim dari semua batch untuk detail ini
+            $total_kirim_dus = 0;
+            foreach ($batches as $batch) {
+                $total_kirim_dus += intval($batch['jumlah_kirim_dus'] ?? 0);
             }
             
-            // Jika jumlah kirim = 0, ubah status menjadi TIDAK_DIKIRIM
-            if ($jumlah_kirim_dus <= 0) {
+            // Get kd_barang dari detail transfer
+            $query_detail_info = "SELECT KD_BARANG FROM DETAIL_TRANSFER_BARANG WHERE ID_DETAIL_TRANSFER_BARANG = ?";
+            $stmt_detail_info = $conn->prepare($query_detail_info);
+            if (!$stmt_detail_info) {
+                throw new Exception('Gagal prepare query detail info: ' . $conn->error);
+            }
+            $stmt_detail_info->bind_param("s", $id_detail);
+            $stmt_detail_info->execute();
+            $result_detail_info = $stmt_detail_info->get_result();
+            if ($result_detail_info->num_rows == 0) {
+                continue; // Skip jika detail tidak ditemukan
+            }
+            $detail_info = $result_detail_info->fetch_assoc();
+            $kd_barang = $detail_info['KD_BARANG'];
+            
+            // Update batch terlebih dahulu
+            foreach ($batches as $batch) {
+                $id_pesan_barang = $batch['id_pesan_barang'] ?? '';
+                $id_batch = $batch['id_detail_transfer_batch'] ?? '';
+                $jumlah_kirim_batch = intval($batch['jumlah_kirim_dus'] ?? 0);
+                
+                if (empty($id_pesan_barang) || empty($id_batch)) {
+                    continue;
+                }
+                
+                // Update JUMLAH_KIRIM_DUS di DETAIL_TRANSFER_BARANG_BATCH
+                $update_batch = "UPDATE DETAIL_TRANSFER_BARANG_BATCH 
+                                 SET JUMLAH_KIRIM_DUS = ?
+                                 WHERE ID_DETAIL_TRANSFER_BARANG_BATCH = ? AND ID_DETAIL_TRANSFER_BARANG = ? AND ID_PESAN_BARANG = ?";
+                $stmt_batch = $conn->prepare($update_batch);
+                if (!$stmt_batch) {
+                    throw new Exception('Gagal prepare query update batch: ' . $conn->error);
+                }
+                $stmt_batch->bind_param("isss", $jumlah_kirim_batch, $id_batch, $id_detail, $id_pesan_barang);
+                if (!$stmt_batch->execute()) {
+                    throw new Exception('Gagal update batch: ' . $stmt_batch->error);
+                }
+                
+                // Kurangi SISA_STOCK_DUS di PESAN_BARANG langsung dari jumlah batch
+                if ($jumlah_kirim_batch > 0) {
+                    // Get SISA_STOCK_DUS saat ini (sebelum dikurangi)
+                    $query_sisa = "SELECT SISA_STOCK_DUS FROM PESAN_BARANG WHERE ID_PESAN_BARANG = ?";
+                    $stmt_sisa = $conn->prepare($query_sisa);
+                    if (!$stmt_sisa) {
+                        throw new Exception('Gagal prepare query sisa stock: ' . $conn->error);
+                    }
+                    $stmt_sisa->bind_param("s", $id_pesan_barang);
+                    $stmt_sisa->execute();
+                    $result_sisa = $stmt_sisa->get_result();
+                    
+                    if ($result_sisa->num_rows > 0) {
+                        $sisa_data = $result_sisa->fetch_assoc();
+                        $sisa_stock_dus_awal = intval($sisa_data['SISA_STOCK_DUS'] ?? 0);
+                        
+                        // Kurangi SISA_STOCK_DUS
+                        $sisa_stock_dus_akhir = max(0, $sisa_stock_dus_awal - $jumlah_kirim_batch); // Pastikan tidak negatif
+                        $update_sisa = "UPDATE PESAN_BARANG SET SISA_STOCK_DUS = ? WHERE ID_PESAN_BARANG = ?";
+                        $stmt_update_sisa = $conn->prepare($update_sisa);
+                        if (!$stmt_update_sisa) {
+                            throw new Exception('Gagal prepare query update sisa stock: ' . $conn->error);
+                        }
+                        $stmt_update_sisa->bind_param("is", $sisa_stock_dus_akhir, $id_pesan_barang);
+                        if (!$stmt_update_sisa->execute()) {
+                            throw new Exception('Gagal update SISA_STOCK_DUS: ' . $stmt_update_sisa->error);
+                        }
+                    }
+                }
+            }
+            
+            // Update STOCK di gudang (lokasi asal) - kurangi stock untuk total keseluruhan
+            // Hanya update jika total kirim > 0
+            if ($total_kirim_dus > 0) {
+                // Get SATUAN dari STOCK
+                $query_satuan = "SELECT SATUAN, JUMLAH_BARANG FROM STOCK WHERE KD_BARANG = ? AND KD_LOKASI = ?";
+                $stmt_satuan = $conn->prepare($query_satuan);
+                if (!$stmt_satuan) {
+                    throw new Exception('Gagal prepare query satuan: ' . $conn->error);
+                }
+                $stmt_satuan->bind_param("ss", $kd_barang, $kd_lokasi);
+                $stmt_satuan->execute();
+                $result_satuan = $stmt_satuan->get_result();
+                
+                if ($result_satuan->num_rows > 0) {
+                    $stock_data = $result_satuan->fetch_assoc();
+                    $satuan = $stock_data['SATUAN'];
+                    $jumlah_awal = $stock_data['JUMLAH_BARANG'];
+                    
+                    // Konversi jumlah kirim dari DUS ke PIECES jika perlu
+                    $jumlah_kirim_pieces = $total_kirim_dus;
+                    if ($satuan == 'PIECES') {
+                        // Get SATUAN_PERDUS dari MASTER_BARANG
+                        $query_satuan_perdus = "SELECT SATUAN_PERDUS FROM MASTER_BARANG WHERE KD_BARANG = ?";
+                        $stmt_satuan_perdus = $conn->prepare($query_satuan_perdus);
+                        $stmt_satuan_perdus->bind_param("s", $kd_barang);
+                        $stmt_satuan_perdus->execute();
+                        $result_satuan_perdus = $stmt_satuan_perdus->get_result();
+                        if ($result_satuan_perdus->num_rows > 0) {
+                            $satuan_perdus = $result_satuan_perdus->fetch_assoc()['SATUAN_PERDUS'];
+                            $jumlah_kirim_pieces = $total_kirim_dus * $satuan_perdus;
+                        }
+                    }
+                    
+                    // Update STOCK di gudang (lokasi asal) - kurangi stock
+                    $jumlah_akhir = $jumlah_awal - $jumlah_kirim_pieces;
+                    if ($jumlah_akhir < 0) {
+                        throw new Exception('Stock tidak mencukupi untuk barang: ' . $kd_barang);
+                    }
+                    
+                    $update_stock = "UPDATE STOCK 
+                                   SET JUMLAH_BARANG = ?, 
+                                       LAST_UPDATED = CURRENT_TIMESTAMP,
+                                       UPDATED_BY = ?
+                                   WHERE KD_BARANG = ? AND KD_LOKASI = ?";
+                    $stmt_update_stock = $conn->prepare($update_stock);
+                    if (!$stmt_update_stock) {
+                        throw new Exception('Gagal prepare query update stock: ' . $conn->error);
+                    }
+                    $stmt_update_stock->bind_param("isss", $jumlah_akhir, $user_id, $kd_barang, $kd_lokasi);
+                    if (!$stmt_update_stock->execute()) {
+                        throw new Exception('Gagal mengupdate stock: ' . $stmt_update_stock->error);
+                    }
+                    
+                    // Insert ke STOCK_HISTORY dengan REF = ID_TRANSFER_BARANG
+                    $id_history = '';
+                    do {
+                        $id_history = ShortIdGenerator::generate(16, '');
+                    } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
+                    
+                    $jumlah_perubahan = -$jumlah_kirim_pieces; // Negatif karena mengurangi stock
+                    $insert_history = "INSERT INTO STOCK_HISTORY 
+                                      (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
+                                      VALUES (?, ?, ?, ?, ?, ?, ?, 'TRANSFER', ?, ?)";
+                    $stmt_history = $conn->prepare($insert_history);
+                    if (!$stmt_history) {
+                        throw new Exception('Gagal prepare query insert history: ' . $conn->error);
+                    }
+                    $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal, $jumlah_perubahan, $jumlah_akhir, $id_transfer, $satuan);
+                    if (!$stmt_history->execute()) {
+                        throw new Exception('Gagal insert history: ' . $stmt_history->error);
+                    }
+                }
+            }
+            
+            // Update TOTAL_KIRIM_DUS dan STATUS di DETAIL_TRANSFER_BARANG
+            // Jika total kirim = 0, ubah status menjadi TIDAK_DIKIRIM
+            if ($total_kirim_dus <= 0) {
                 $update_detail_tidak_kirim = "UPDATE DETAIL_TRANSFER_BARANG 
-                                             SET JUMLAH_KIRIM_DUS = 0, STATUS = 'TIDAK_DIKIRIM'
+                                             SET TOTAL_KIRIM_DUS = 0, STATUS = 'TIDAK_DIKIRIM'
                                              WHERE ID_DETAIL_TRANSFER_BARANG = ? AND ID_TRANSFER_BARANG = ? AND STATUS = 'DIPESAN'";
                 $stmt_detail_tidak_kirim = $conn->prepare($update_detail_tidak_kirim);
                 if (!$stmt_detail_tidak_kirim) {
@@ -192,111 +390,47 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 if (!$stmt_detail_tidak_kirim->execute()) {
                     throw new Exception('Gagal update detail transfer tidak kirim: ' . $stmt_detail_tidak_kirim->error);
                 }
-                continue; // Skip untuk update stock
-            }
-            
-            // Jika jumlah kirim > 0, update detail transfer: set JUMLAH_KIRIM_DUS dan STATUS = 'DIKIRIM'
-            $update_detail = "UPDATE DETAIL_TRANSFER_BARANG 
-                             SET JUMLAH_KIRIM_DUS = ?, STATUS = 'DIKIRIM'
-                             WHERE ID_DETAIL_TRANSFER_BARANG = ? AND ID_TRANSFER_BARANG = ? AND STATUS = 'DIPESAN'";
-            $stmt_detail = $conn->prepare($update_detail);
-            if (!$stmt_detail) {
-                throw new Exception('Gagal prepare query detail: ' . $conn->error);
-            }
-            $stmt_detail->bind_param("iss", $jumlah_kirim_dus, $id_detail, $id_transfer);
-            if (!$stmt_detail->execute()) {
-                throw new Exception('Gagal update detail transfer: ' . $stmt_detail->error);
-            }
-            
-            $detail_kirim_ids[] = $id_detail;
-            $total_detail_kirim++;
-            
-            // Get SATUAN dari STOCK
-            $query_satuan = "SELECT SATUAN, JUMLAH_BARANG FROM STOCK WHERE KD_BARANG = ? AND KD_LOKASI = ?";
-            $stmt_satuan = $conn->prepare($query_satuan);
-            if (!$stmt_satuan) {
-                throw new Exception('Gagal prepare query satuan: ' . $conn->error);
-            }
-            $stmt_satuan->bind_param("ss", $kd_barang, $kd_lokasi);
-            $stmt_satuan->execute();
-            $result_satuan = $stmt_satuan->get_result();
-            
-            if ($result_satuan->num_rows > 0) {
-                $stock_data = $result_satuan->fetch_assoc();
-                $satuan = $stock_data['SATUAN'];
-                $jumlah_awal = $stock_data['JUMLAH_BARANG'];
                 
-                // Konversi jumlah kirim dari DUS ke PIECES jika perlu
-                $jumlah_kirim_pieces = $jumlah_kirim_dus;
-                if ($satuan == 'PIECES') {
-                    // Get SATUAN_PERDUS dari MASTER_BARANG
-                    $query_satuan_perdus = "SELECT SATUAN_PERDUS FROM MASTER_BARANG WHERE KD_BARANG = ?";
-                    $stmt_satuan_perdus = $conn->prepare($query_satuan_perdus);
-                    $stmt_satuan_perdus->bind_param("s", $kd_barang);
-                    $stmt_satuan_perdus->execute();
-                    $result_satuan_perdus = $stmt_satuan_perdus->get_result();
-                    if ($result_satuan_perdus->num_rows > 0) {
-                        $satuan_perdus = $result_satuan_perdus->fetch_assoc()['SATUAN_PERDUS'];
-                        $jumlah_kirim_pieces = $jumlah_kirim_dus * $satuan_perdus;
-                    }
+                // Update semua batch terkait menjadi JUMLAH_KIRIM_DUS = 0
+                $update_batch_tidak_kirim = "UPDATE DETAIL_TRANSFER_BARANG_BATCH 
+                                             SET JUMLAH_KIRIM_DUS = 0
+                                             WHERE ID_DETAIL_TRANSFER_BARANG = ?";
+                $stmt_batch_tidak_kirim = $conn->prepare($update_batch_tidak_kirim);
+                if (!$stmt_batch_tidak_kirim) {
+                    throw new Exception('Gagal prepare query batch tidak kirim: ' . $conn->error);
+                }
+                $stmt_batch_tidak_kirim->bind_param("s", $id_detail);
+                if (!$stmt_batch_tidak_kirim->execute()) {
+                    throw new Exception('Gagal update batch tidak kirim: ' . $stmt_batch_tidak_kirim->error);
+                }
+            } else {
+                // Jika total kirim > 0, update detail transfer: set TOTAL_KIRIM_DUS dan STATUS = 'DIKIRIM'
+                $update_detail = "UPDATE DETAIL_TRANSFER_BARANG 
+                                 SET TOTAL_KIRIM_DUS = ?, STATUS = 'DIKIRIM'
+                                 WHERE ID_DETAIL_TRANSFER_BARANG = ? AND ID_TRANSFER_BARANG = ? AND STATUS = 'DIPESAN'";
+                $stmt_detail = $conn->prepare($update_detail);
+                if (!$stmt_detail) {
+                    throw new Exception('Gagal prepare query detail: ' . $conn->error);
+                }
+                $stmt_detail->bind_param("iss", $total_kirim_dus, $id_detail, $id_transfer);
+                if (!$stmt_detail->execute()) {
+                    throw new Exception('Gagal update detail transfer: ' . $stmt_detail->error);
                 }
                 
-                // Update STOCK di gudang (lokasi asal) - kurangi stock
-                $jumlah_akhir = $jumlah_awal - $jumlah_kirim_pieces;
-                if ($jumlah_akhir < 0) {
-                    throw new Exception('Stock tidak mencukupi untuk barang: ' . $kd_barang);
-                }
-                
-                $update_stock = "UPDATE STOCK 
-                               SET JUMLAH_BARANG = ?, 
-                                   LAST_UPDATED = CURRENT_TIMESTAMP,
-                                   UPDATED_BY = ?
-                               WHERE KD_BARANG = ? AND KD_LOKASI = ?";
-                $stmt_update_stock = $conn->prepare($update_stock);
-                if (!$stmt_update_stock) {
-                    throw new Exception('Gagal prepare query update stock: ' . $conn->error);
-                }
-                $stmt_update_stock->bind_param("isss", $jumlah_akhir, $user_id, $kd_barang, $kd_lokasi);
-                if (!$stmt_update_stock->execute()) {
-                    throw new Exception('Gagal mengupdate stock: ' . $stmt_update_stock->error);
-                }
-                
-                // Insert ke STOCK_HISTORY
-                $id_history = '';
-                do {
-                    $id_history = ShortIdGenerator::generate(16, '');
-                } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
-                
-                $jumlah_perubahan = -$jumlah_kirim_pieces; // Negatif karena mengurangi stock
-                $insert_history = "INSERT INTO STOCK_HISTORY 
-                                  (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, 'TRANSFER', ?, ?)";
-                $stmt_history = $conn->prepare($insert_history);
-                if (!$stmt_history) {
-                    throw new Exception('Gagal prepare query insert history: ' . $conn->error);
-                }
-                $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal, $jumlah_perubahan, $jumlah_akhir, $id_transfer, $satuan);
-                if (!$stmt_history->execute()) {
-                    throw new Exception('Gagal insert history: ' . $stmt_history->error);
-                }
+                $detail_kirim_ids[] = $id_detail;
+                $total_detail_kirim++;
             }
         }
         
-        // Kumpulkan ID detail yang sudah diproses (baik yang 0 maupun > 0)
-        $detail_processed_ids = [];
-        foreach ($detail_kirim as $detail) {
-            $id_detail = $detail['id_detail_transfer'] ?? '';
-            if (!empty($id_detail)) {
-                $detail_processed_ids[] = $id_detail;
-            }
-        }
+        // Kumpulkan ID detail yang sudah diproses (dari detail_batch_map)
+        $detail_processed_ids = array_keys($detail_batch_map);
         
         // Update status detail yang tidak ada di $detail_kirim (tidak diproses sama sekali)
         foreach ($all_detail_ids as $detail_id) {
             if (!in_array($detail_id, $detail_processed_ids)) {
                 // Detail ini tidak ada di request, ubah menjadi TIDAK_DIKIRIM
                 $update_detail_tidak_kirim = "UPDATE DETAIL_TRANSFER_BARANG 
-                                             SET JUMLAH_KIRIM_DUS = 0, STATUS = 'TIDAK_DIKIRIM'
+                                             SET TOTAL_KIRIM_DUS = 0, STATUS = 'TIDAK_DIKIRIM'
                                              WHERE ID_DETAIL_TRANSFER_BARANG = ? AND ID_TRANSFER_BARANG = ? AND STATUS = 'DIPESAN'";
                 $stmt_detail_tidak_kirim = $conn->prepare($update_detail_tidak_kirim);
                 if (!$stmt_detail_tidak_kirim) {
@@ -305,6 +439,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 $stmt_detail_tidak_kirim->bind_param("ss", $detail_id, $id_transfer);
                 if (!$stmt_detail_tidak_kirim->execute()) {
                     throw new Exception('Gagal update detail transfer tidak kirim: ' . $stmt_detail_tidak_kirim->error);
+                }
+                
+                // Update semua batch terkait menjadi JUMLAH_KIRIM_DUS = 0
+                $update_batch_tidak_kirim = "UPDATE DETAIL_TRANSFER_BARANG_BATCH 
+                                             SET JUMLAH_KIRIM_DUS = 0
+                                             WHERE ID_DETAIL_TRANSFER_BARANG = ?";
+                $stmt_batch_tidak_kirim = $conn->prepare($update_batch_tidak_kirim);
+                if (!$stmt_batch_tidak_kirim) {
+                    throw new Exception('Gagal prepare query batch tidak kirim: ' . $conn->error);
+                }
+                $stmt_batch_tidak_kirim->bind_param("s", $detail_id);
+                if (!$stmt_batch_tidak_kirim->execute()) {
+                    throw new Exception('Gagal update batch tidak kirim: ' . $stmt_batch_tidak_kirim->error);
                 }
             }
         }
@@ -354,7 +501,7 @@ $query_transfer = "SELECT
     tb.KD_LOKASI_TUJUAN,
     ml_tujuan.NAMA_LOKASI as NAMA_LOKASI_TUJUAN,
     ml_tujuan.ALAMAT_LOKASI as ALAMAT_LOKASI_TUJUAN,
-    COALESCE(SUM(dtb.JUMLAH_PESAN_TRANSFER_DUS), 0) as TOTAL_DIPESAN_DUS,
+    COALESCE(SUM(dtb.TOTAL_PESAN_TRANSFER_DUS), 0) as TOTAL_DIPESAN_DUS,
     COUNT(CASE WHEN dtb.STATUS = 'DIPESAN' THEN 1 END) as JUMLAH_DETAIL_DIPESAN,
     COUNT(CASE WHEN dtb.STATUS = 'TIDAK_DIKIRIM' THEN 1 END) as JUMLAH_DETAIL_TIDAK_DIKIRIM,
     COUNT(dtb.ID_DETAIL_TRANSFER_BARANG) as TOTAL_DETAIL
@@ -613,14 +760,15 @@ $active_page = 'perpindahan_barang';
                                     <th>Kategori</th>
                                     <th>Nama Barang</th>
                                     <th>Berat (gr)</th>
-                                    <th>Jumlah pesan (dus)</th>
-                                    <th>Jumlah Kirim (dus)</th>
+                                    <th>Total Pesan (dus)</th>
+                                    <th>Batch</th>
+                                    <th>Total Kirim (dus)</th>
                                     <th>Kirim Semua</th>
                                 </tr>
                             </thead>
                             <tbody id="tbodyValidasiKirim">
                                 <tr>
-                                    <td colspan="9" class="text-center text-muted">Memuat data...</td>
+                                    <td colspan="10" class="text-center text-muted">Memuat data...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -726,11 +874,39 @@ $active_page = 'perpindahan_barang';
             tbody.empty();
             
             if (data.length === 0) {
-                tbody.append('<tr><td colspan="9" class="text-center text-muted">Tidak ada data</td></tr>');
+                tbody.append('<tr><td colspan="10" class="text-center text-muted">Tidak ada data</td></tr>');
                 return;
             }
             
             data.forEach(function(item, index) {
+                // Render batch info dengan input per batch
+                var batchHtml = '';
+                if (item.batches && item.batches.length > 0) {
+                    batchHtml = '<div class="d-flex flex-column gap-2">';
+                    item.batches.forEach(function(batch, batchIndex) {
+                        batchHtml += '<div class="small border rounded p-2">' +
+                            '<strong>' + escapeHtml(batch.id_pesan_barang) + '</strong><br>' +
+                            '<span class="text-muted">Exp: ' + escapeHtml(batch.tgl_expired_display) + '</span><br>' +
+                            '<span class="text-muted">Sisa: ' + numberFormat(batch.sisa_stock_dus) + ' dus</span><br>' +
+                            '<span class="text-muted">Pesan: ' + numberFormat(batch.jumlah_dus) + ' dus</span><br>' +
+                            '<label class="form-label small mb-1">Kirim (dus):</label>' +
+                            '<input type="number" class="form-control form-control-sm batch-kirim-dus" ' +
+                            'min="0" max="' + Math.min(batch.sisa_stock_dus, batch.jumlah_dus) + '" ' +
+                            'value="0" ' +
+                            'data-id-detail="' + escapeHtml(item.id_detail_transfer) + '" ' +
+                            'data-id-pesan-barang="' + escapeHtml(batch.id_pesan_barang) + '" ' +
+                            'data-id-batch="' + escapeHtml(batch.id_detail_transfer_batch) + '" ' +
+                            'data-jumlah-pesan="' + batch.jumlah_dus + '" ' +
+                            'data-index="' + index + '" ' +
+                            'data-batch-index="' + batchIndex + '" ' +
+                            'style="width: 100px;">' +
+                            '</div>';
+                    });
+                    batchHtml += '</div>';
+                } else {
+                    batchHtml = '<span class="text-muted">-</span>';
+                }
+                
                 var row = '<tr data-id-detail="' + escapeHtml(item.id_detail_transfer) + '" data-kd-barang="' + escapeHtml(item.kd_barang) + '">' +
                     '<td>' + escapeHtml(item.id_detail_transfer) + '</td>' +
                     '<td>' + escapeHtml(item.kd_barang) + '</td>' +
@@ -739,8 +915,9 @@ $active_page = 'perpindahan_barang';
                     '<td>' + escapeHtml(item.nama_barang) + '</td>' +
                     '<td>' + numberFormat(item.berat) + '</td>' +
                     '<td>' + numberFormat(item.jumlah_pesan_dus) + '</td>' +
-                    '<td><input type="number" class="form-control form-control-sm jumlah-kirim-dus" min="0" max="' + item.jumlah_pesan_dus + '" value="0" data-index="' + index + '" style="width: 100px;"></td>' +
-                    '<td><input type="checkbox" class="form-check-input kirim-semua" data-index="' + index + '" data-jumlah-pesan="' + item.jumlah_pesan_dus + '"></td>' +
+                    '<td style="min-width: 250px;">' + batchHtml + '</td>' +
+                    '<td><input type="text" class="form-control form-control-sm total-kirim-dus" value="0" data-index="' + index + '" style="width: 100px; background-color: #e9ecef; cursor: not-allowed;" readonly disabled></td>' +
+                    '<td><input type="checkbox" class="form-check-input kirim-semua-barang" data-index="' + index + '" data-id-detail="' + escapeHtml(item.id_detail_transfer) + '"></td>' +
                     '</tr>';
                 tbody.append(row);
             });
@@ -750,82 +927,168 @@ $active_page = 'perpindahan_barang';
         }
         
         function attachValidasiKirimEventListeners() {
-            // Event listener untuk checkbox "Kirim Semua"
-            $(document).off('change', '.kirim-semua').on('change', '.kirim-semua', function() {
-                var index = $(this).data('index');
-                var jumlahPesan = parseInt($(this).data('jumlah-pesan')) || 0;
+            // Event listener untuk input jumlah kirim per batch
+            $(document).off('input change', '.batch-kirim-dus').on('input change', '.batch-kirim-dus', function() {
+                var $input = $(this);
+                var idDetail = $input.data('id-detail');
+                var index = $input.data('index');
+                var jumlahKirim = parseInt($input.val()) || 0;
+                var maxJumlah = parseInt($input.attr('max')) || 0;
                 
-                if ($(this).is(':checked')) {
-                    // Set jumlah kirim = jumlah pesan
-                    $('.jumlah-kirim-dus[data-index="' + index + '"]').val(jumlahPesan);
-                } else {
-                    // Reset ke 0
-                    $('.jumlah-kirim-dus[data-index="' + index + '"]').val(0);
+                // Validasi tidak boleh melebihi max
+                if (jumlahKirim > maxJumlah) {
+                    $input.val(maxJumlah);
+                    jumlahKirim = maxJumlah;
                 }
+                
+                // Validasi tidak boleh negatif
+                if (jumlahKirim < 0) {
+                    $input.val(0);
+                    jumlahKirim = 0;
+                }
+                
+                // Update total kirim untuk detail transfer ini
+                updateTotalKirimDetail(idDetail, index);
+                
+                // Update checkbox "Kirim Semua" berdasarkan apakah semua batch sudah terisi penuh
+                updateCheckboxKirimSemua(idDetail, index);
             });
             
-            // Event listener untuk input jumlah kirim
-            $(document).off('input', '.jumlah-kirim-dus').on('input', '.jumlah-kirim-dus', function() {
-                var index = $(this).data('index');
-                var jumlahKirim = parseInt($(this).val()) || 0;
-                var jumlahPesan = parseInt($('.kirim-semua[data-index="' + index + '"]').data('jumlah-pesan')) || 0;
+            // Event listener untuk checkbox "Kirim Semua"
+            $(document).off('change', '.kirim-semua-barang').on('change', '.kirim-semua-barang', function() {
+                var $checkbox = $(this);
+                var index = $checkbox.data('index');
+                var idDetail = $checkbox.data('id-detail');
                 
-                // Update checkbox "Kirim Semua"
-                if (jumlahKirim == jumlahPesan) {
-                    $('.kirim-semua[data-index="' + index + '"]').prop('checked', true);
+                if ($checkbox.is(':checked')) {
+                    // Isi semua batch dengan jumlah pesan masing-masing
+                    $('.batch-kirim-dus[data-id-detail="' + idDetail + '"]').each(function() {
+                        var $batchInput = $(this);
+                        var jumlahPesan = parseInt($batchInput.data('jumlah-pesan')) || 0;
+                        var maxJumlah = parseInt($batchInput.attr('max')) || 0;
+                        // Gunakan jumlah pesan atau max, ambil yang lebih kecil
+                        var jumlahIsi = Math.min(jumlahPesan, maxJumlah);
+                        $batchInput.val(jumlahIsi);
+                    });
+                    
+                    // Update total kirim
+                    updateTotalKirimDetail(idDetail, index);
                 } else {
-                    $('.kirim-semua[data-index="' + index + '"]').prop('checked', false);
+                    // Reset semua batch ke 0
+                    $('.batch-kirim-dus[data-id-detail="' + idDetail + '"]').each(function() {
+                        $(this).val(0);
+                    });
+                    
+                    // Update total kirim
+                    updateTotalKirimDetail(idDetail, index);
                 }
             });
         }
         
+        function updateCheckboxKirimSemua(idDetail, index) {
+            var semuaTerisiPenuh = true;
+            var adaYangTerisi = false;
+            
+            $('.batch-kirim-dus[data-id-detail="' + idDetail + '"]').each(function() {
+                var $input = $(this);
+                var jumlahKirim = parseInt($input.val()) || 0;
+                var jumlahPesan = parseInt($input.data('jumlah-pesan')) || 0;
+                var maxJumlah = parseInt($input.attr('max')) || 0;
+                var jumlahMaksimal = Math.min(jumlahPesan, maxJumlah);
+                
+                if (jumlahKirim > 0) {
+                    adaYangTerisi = true;
+                }
+                
+                if (jumlahKirim < jumlahMaksimal) {
+                    semuaTerisiPenuh = false;
+                }
+            });
+            
+            // Update checkbox: checked jika semua terisi penuh, unchecked jika tidak
+            var $checkbox = $('.kirim-semua-barang[data-id-detail="' + idDetail + '"]');
+            if (semuaTerisiPenuh && adaYangTerisi) {
+                $checkbox.prop('checked', true);
+            } else {
+                $checkbox.prop('checked', false);
+            }
+        }
+        
+        function updateTotalKirimDetail(idDetail, index) {
+            var totalKirim = 0;
+            
+            // Hitung total dari semua batch untuk detail transfer ini
+            $('.batch-kirim-dus[data-id-detail="' + idDetail + '"]').each(function() {
+                var jumlah = parseInt($(this).val()) || 0;
+                totalKirim += jumlah;
+            });
+            
+            // Update field total kirim (readonly)
+            $('.total-kirim-dus[data-index="' + index + '"]').val(totalKirim);
+        }
+        
         function simpanValidasiKirim() {
             var idTransfer = $('#validasi_id_transfer').val();
-            var detailKirim = [];
-            var detailSemua = [];
+            var batchKirim = [];
+            var detailMap = {}; // Untuk tracking total per detail
             var detailZero = [];
             var detailTidakPenuh = [];
             
-            // Kumpulkan semua data dari tabel (termasuk yang 0)
-            $('#tbodyValidasiKirim tr[data-id-detail]').each(function() {
-                var idDetail = $(this).data('id-detail');
-                var kdBarang = $(this).data('kd-barang');
-                var jumlahKirimDus = parseInt($(this).find('.jumlah-kirim-dus').val()) || 0;
-                var jumlahPesanDus = parseInt($(this).find('.jumlah-kirim-dus').attr('max')) || 0;
-                var namaBarang = $(this).find('td').eq(4).text(); // Kolom Nama Barang
+            // Kumpulkan semua data batch dari tabel
+            $('.batch-kirim-dus').each(function() {
+                var $input = $(this);
+                var idDetail = $input.data('id-detail');
+                var idPesanBarang = $input.data('id-pesan-barang');
+                var idBatch = $input.data('id-batch');
+                var jumlahKirimDus = parseInt($input.val()) || 0;
+                var jumlahPesanDus = parseInt($input.data('jumlah-pesan')) || 0;
                 
-                detailSemua.push({
+                // Kumpulkan data batch
+                batchKirim.push({
                     id_detail_transfer: idDetail,
-                    kd_barang: kdBarang,
+                    id_pesan_barang: idPesanBarang,
+                    id_detail_transfer_batch: idBatch,
                     jumlah_kirim_dus: jumlahKirimDus,
-                    jumlah_pesan_dus: jumlahPesanDus,
-                    nama_barang: namaBarang
+                    jumlah_pesan_dus: jumlahPesanDus
                 });
                 
-                if (jumlahKirimDus > 0) {
-                    detailKirim.push({
+                // Track total per detail
+                if (!detailMap[idDetail]) {
+                    var $row = $input.closest('tr[data-id-detail]');
+                    detailMap[idDetail] = {
                         id_detail_transfer: idDetail,
-                        kd_barang: kdBarang,
-                        jumlah_kirim_dus: jumlahKirimDus
-                    });
-                    
+                        kd_barang: $row.data('kd-barang'),
+                        nama_barang: $row.find('td').eq(4).text(),
+                        total_kirim_dus: 0,
+                        total_pesan_dus: 0
+                    };
+                }
+                detailMap[idDetail].total_kirim_dus += jumlahKirimDus;
+                detailMap[idDetail].total_pesan_dus += jumlahPesanDus;
+            });
+            
+            // Analisis detail untuk konfirmasi
+            Object.keys(detailMap).forEach(function(idDetail) {
+                var detail = detailMap[idDetail];
+                if (detail.total_kirim_dus > 0) {
                     // Cek apakah tidak kirim semua/penuh
-                    if (jumlahKirimDus < jumlahPesanDus) {
+                    if (detail.total_kirim_dus < detail.total_pesan_dus) {
                         detailTidakPenuh.push({
-                            nama_barang: namaBarang,
-                            jumlah_kirim_dus: jumlahKirimDus,
-                            jumlah_pesan_dus: jumlahPesanDus
+                            nama_barang: detail.nama_barang,
+                            jumlah_kirim_dus: detail.total_kirim_dus,
+                            jumlah_pesan_dus: detail.total_pesan_dus
                         });
                     }
                 } else {
                     detailZero.push({
-                        nama_barang: namaBarang
+                        nama_barang: detail.nama_barang
                     });
                 }
             });
             
             // Jika hanya 1 barang dan jumlah kirim = 0, konfirmasi
-            if (detailSemua.length === 1 && detailZero.length === 1) {
+            var detailKeys = Object.keys(detailMap);
+            if (detailKeys.length === 1 && detailZero.length === 1) {
                 Swal.fire({
                     icon: 'question',
                     title: 'Konfirmasi',
@@ -837,14 +1100,14 @@ $active_page = 'perpindahan_barang';
                     cancelButtonColor: '#6c757d'
                 }).then((result) => {
                     if (result.isConfirmed) {
-                        konfirmasiFinalKirim(idTransfer, detailKirim, detailTidakPenuh);
+                        konfirmasiFinalKirim(idTransfer, batchKirim);
                     }
                 });
                 return;
             }
             
             // Jika ada yang jumlah kirim = 0 (dan bukan hanya 1 barang)
-            if (detailZero.length > 0 && detailSemua.length > 1) {
+            if (detailZero.length > 0 && detailKeys.length > 1) {
                 var message = 'Beberapa barang memiliki jumlah kirim 0:\n\n';
                 detailZero.forEach(function(item) {
                     message += '- ' + item.nama_barang + '\n';
@@ -862,17 +1125,17 @@ $active_page = 'perpindahan_barang';
                     cancelButtonColor: '#6c757d'
                 }).then((result) => {
                     if (result.isConfirmed) {
-                        konfirmasiTidakPenuh(idTransfer, detailKirim, detailTidakPenuh);
+                        konfirmasiTidakPenuh(idTransfer, batchKirim, detailTidakPenuh);
                     }
                 });
                 return;
             }
             
             // Jika tidak ada yang 0, langsung cek tidak penuh
-            konfirmasiTidakPenuh(idTransfer, detailKirim, detailTidakPenuh);
+            konfirmasiTidakPenuh(idTransfer, batchKirim, detailTidakPenuh);
         }
         
-        function konfirmasiTidakPenuh(idTransfer, detailKirim, detailTidakPenuh) {
+        function konfirmasiTidakPenuh(idTransfer, batchKirim, detailTidakPenuh) {
             // Jika ada yang tidak kirim semua/penuh
             if (detailTidakPenuh.length > 0) {
                 var message = 'Beberapa barang tidak dikirim secara penuh:\n\n';
@@ -892,16 +1155,16 @@ $active_page = 'perpindahan_barang';
                     cancelButtonColor: '#6c757d'
                 }).then((result) => {
                     if (result.isConfirmed) {
-                        konfirmasiFinalKirim(idTransfer, detailKirim, detailTidakPenuh);
+                        konfirmasiFinalKirim(idTransfer, batchKirim);
                     }
                 });
             } else {
                 // Semua kirim penuh, langsung konfirmasi final
-                konfirmasiFinalKirim(idTransfer, detailKirim, detailTidakPenuh);
+                konfirmasiFinalKirim(idTransfer, batchKirim);
             }
         }
         
-        function konfirmasiFinalKirim(idTransfer, detailKirim, detailTidakPenuh) {
+        function konfirmasiFinalKirim(idTransfer, batchKirim) {
             // Konfirmasi final
             Swal.fire({
                 icon: 'question',
@@ -914,17 +1177,27 @@ $active_page = 'perpindahan_barang';
                 cancelButtonColor: '#6c757d'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    // Kumpulkan semua detail (termasuk yang 0) untuk dikirim ke server
-                    var detailSemuaKirim = [];
-                    $('#tbodyValidasiKirim tr[data-id-detail]').each(function() {
-                        var idDetail = $(this).data('id-detail');
-                        var kdBarang = $(this).data('kd-barang');
-                        var jumlahKirimDus = parseInt($(this).find('.jumlah-kirim-dus').val()) || 0;
+                    // Pastikan semua batch (termasuk yang 0) dikumpulkan
+                    // batchKirim sudah dikumpulkan sebelumnya di fungsi simpanValidasiKirim
+                    // Tapi kita perlu memastikan semua batch ada, termasuk yang tidak diinput (nilai 0)
+                    var batchKirimFinal = [];
+                    $('.batch-kirim-dus').each(function() {
+                        var $input = $(this);
+                        var idDetail = $input.data('id-detail');
+                        var idPesanBarang = $input.data('id-pesan-barang');
+                        var idBatch = $input.data('id-batch');
+                        var $row = $input.closest('tr[data-id-detail]');
+                        var kdBarang = $row.data('kd-barang');
+                        var jumlahKirimDus = parseInt($input.val()) || 0;
+                        var jumlahPesanDus = parseInt($input.data('jumlah-pesan')) || 0;
                         
-                        detailSemuaKirim.push({
+                        batchKirimFinal.push({
                             id_detail_transfer: idDetail,
+                            id_pesan_barang: idPesanBarang,
+                            id_detail_transfer_batch: idBatch,
                             kd_barang: kdBarang,
-                            jumlah_kirim_dus: jumlahKirimDus
+                            jumlah_kirim_dus: jumlahKirimDus,
+                            jumlah_pesan_dus: jumlahPesanDus
                         });
                     });
                     
@@ -934,7 +1207,7 @@ $active_page = 'perpindahan_barang';
                         data: {
                             action: 'validasi_kirim',
                             id_transfer: idTransfer,
-                            detail_kirim: detailSemuaKirim
+                            batch_kirim: batchKirimFinal
                         },
                         dataType: 'json',
                         success: function(response) {
@@ -1005,7 +1278,7 @@ $active_page = 'perpindahan_barang';
         
         // Reset modal saat ditutup
         $('#modalValidasiKirim').on('hidden.bs.modal', function() {
-            $('#tbodyValidasiKirim').html('<tr><td colspan="9" class="text-center text-muted">Memuat data...</td></tr>');
+            $('#tbodyValidasiKirim').html('<tr><td colspan="10" class="text-center text-muted">Memuat data...</td></tr>');
         });
     </script>
 </body>

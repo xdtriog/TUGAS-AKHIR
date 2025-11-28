@@ -152,9 +152,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         exit();
     }
     
-    // Validasi: total masuk harus sama dengan jumlah dikirim - jumlah ditolak
+    // Validasi: total masuk harus sama dengan jumlah tiba - jumlah ditolak
     if ($total_masuk != ($jumlah_dikirim - $jumlah_ditolak)) {
-        echo json_encode(['success' => false, 'message' => 'Total masuk harus sama dengan (Jumlah Dikirim - Jumlah Ditolak)!']);
+        echo json_encode(['success' => false, 'message' => 'Total masuk harus sama dengan (Jumlah Tiba - Jumlah Ditolak)!']);
         exit();
     }
     
@@ -183,36 +183,43 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         $pesan_data = $result_pesan->fetch_assoc();
         $kd_barang = $pesan_data['KD_BARANG'];
         
-        // Update status PESAN_BARANG menjadi SELESAI dan set WAKTU_SAMPAI, HARGA_PESAN_BARANG_DUS, dan BIAYA_PENGIRIMAAN
+        // JUMLAH_TIBA_DUS = jumlah yang tiba (jumlah_dikirim, termasuk yang ditolak)
+        $jumlah_tiba_dus = $jumlah_dikirim;
+        
+        // Update status PESAN_BARANG menjadi SELESAI dan set WAKTU_SAMPAI, HARGA_PESAN_BARANG_DUS, BIAYA_PENGIRIMAAN, dan SISA_STOCK_DUS
         if (!empty($tgl_expired)) {
             $update_pesan = "UPDATE PESAN_BARANG 
                             SET STATUS = 'SELESAI', 
                                 WAKTU_SAMPAI = CURRENT_TIMESTAMP,
+                                JUMLAH_TIBA_DUS = ?,
                                 TOTAL_MASUK_DUS = ?,
                                 JUMLAH_DITOLAK_DUS = ?,
                                 HARGA_PESAN_BARANG_DUS = ?,
                                 BIAYA_PENGIRIMAAN = ?,
+                                SISA_STOCK_DUS = ?,
                                 TGL_EXPIRED = ?
                             WHERE ID_PESAN_BARANG = ?";
             $stmt_update = $conn->prepare($update_pesan);
             if (!$stmt_update) {
                 throw new Exception('Gagal prepare query update pesan barang: ' . $conn->error);
             }
-            $stmt_update->bind_param("iiddss", $total_masuk, $jumlah_ditolak, $harga_pesan_dus, $biaya_pengiriman, $tgl_expired, $id_pesan);
+            $stmt_update->bind_param("iiiddiss", $jumlah_tiba_dus, $total_masuk, $jumlah_ditolak, $harga_pesan_dus, $biaya_pengiriman, $total_masuk, $tgl_expired, $id_pesan);
         } else {
             $update_pesan = "UPDATE PESAN_BARANG 
                             SET STATUS = 'SELESAI', 
                                 WAKTU_SAMPAI = CURRENT_TIMESTAMP,
+                                JUMLAH_TIBA_DUS = ?,
                                 TOTAL_MASUK_DUS = ?,
                                 JUMLAH_DITOLAK_DUS = ?,
                                 HARGA_PESAN_BARANG_DUS = ?,
-                                BIAYA_PENGIRIMAAN = ?
+                                BIAYA_PENGIRIMAAN = ?,
+                                SISA_STOCK_DUS = ?
                             WHERE ID_PESAN_BARANG = ?";
             $stmt_update = $conn->prepare($update_pesan);
             if (!$stmt_update) {
                 throw new Exception('Gagal prepare query update pesan barang: ' . $conn->error);
             }
-            $stmt_update->bind_param("iidds", $total_masuk, $jumlah_ditolak, $harga_pesan_dus, $biaya_pengiriman, $id_pesan);
+            $stmt_update->bind_param("iiiddis", $jumlah_tiba_dus, $total_masuk, $jumlah_ditolak, $harga_pesan_dus, $biaya_pengiriman, $total_masuk, $id_pesan);
         }
         if (!$stmt_update->execute()) {
             throw new Exception('Gagal mengupdate data pesan barang: ' . $stmt_update->error);
@@ -614,7 +621,7 @@ $active_page = 'barang_masuk';
                                 <input type="text" class="form-control form-control-sm" id="validasi_jumlah_dipesan" readonly style="background-color: #e9ecef;">
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label fw-bold small">Jumlah Dikirim (dus) <span class="text-danger">*</span></label>
+                                <label class="form-label fw-bold small">Jumlah Tiba (dus) <span class="text-danger">*</span></label>
                                 <input type="number" class="form-control form-control-sm" id="validasi_jumlah_dikirim" name="jumlah_dikirim" min="0" required>
                             </div>
                             <div class="col-md-4">
@@ -838,7 +845,7 @@ $active_page = 'barang_masuk';
                 Swal.fire({
                     icon: 'error',
                     title: 'Error Validasi!',
-                    text: 'Jumlah dikirim dan jumlah ditolak tidak boleh negatif!',
+                    text: 'Jumlah tiba dan jumlah ditolak tidak boleh negatif!',
                     confirmButtonColor: '#e74c3c'
                 });
                 return;
@@ -848,7 +855,7 @@ $active_page = 'barang_masuk';
                 Swal.fire({
                     icon: 'error',
                     title: 'Error Validasi!',
-                    text: 'Jumlah ditolak tidak boleh lebih besar dari jumlah dikirim!',
+                    text: 'Jumlah ditolak tidak boleh lebih besar dari jumlah tiba!',
                     confirmButtonColor: '#e74c3c'
                 });
                 return;
@@ -860,7 +867,7 @@ $active_page = 'barang_masuk';
                 Swal.fire({
                     icon: 'error',
                     title: 'Error Validasi!',
-                    text: 'Total masuk (' + totalMasuk + ') harus sama dengan (Jumlah Dikirim - Jumlah Ditolak) = ' + calculatedTotal,
+                    text: 'Total masuk (' + totalMasuk + ') harus sama dengan (Jumlah Tiba - Jumlah Ditolak) = ' + calculatedTotal,
                     confirmButtonColor: '#e74c3c'
                 });
                 return;

@@ -404,20 +404,20 @@ $active_page = 'stock_opname';
                                 <input type="text" class="form-control form-control-sm" id="opname_merek_barang" readonly style="background-color: #e9ecef;">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label fw-bold small">Kategori Barang</label>
-                                <input type="text" class="form-control form-control-sm" id="opname_kategori_barang" readonly style="background-color: #e9ecef;">
-                            </div>
-                            <div class="col-md-6">
                                 <label class="form-label fw-bold small">Kode Barang</label>
                                 <input type="text" class="form-control form-control-sm" id="opname_kode_barang" readonly style="background-color: #e9ecef;">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label fw-bold small">Nama Barang</label>
-                                <input type="text" class="form-control form-control-sm" id="opname_nama_barang" readonly style="background-color: #e9ecef;">
+                                <label class="form-label fw-bold small">Kategori Barang</label>
+                                <input type="text" class="form-control form-control-sm" id="opname_kategori_barang" readonly style="background-color: #e9ecef;">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold small">Berat (gr)</label>
                                 <input type="text" class="form-control form-control-sm" id="opname_berat" readonly style="background-color: #e9ecef;">
+                            </div>
+                            <div class="col-md-12">
+                                <label class="form-label fw-bold small">Nama Barang</label>
+                                <input type="text" class="form-control form-control-sm" id="opname_nama_barang" readonly style="background-color: #e9ecef;">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold small">Jumlah di sistem (pieces)</label>

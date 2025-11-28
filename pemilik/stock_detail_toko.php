@@ -107,6 +107,87 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     exit();
 }
 
+// Handle AJAX request untuk get batch expired untuk barang tertentu
+if (isset($_GET['get_batch_expired']) && $_GET['get_batch_expired'] == '1') {
+    header('Content-Type: application/json');
+    
+    $kd_barang = isset($_GET['kd_barang']) ? trim($_GET['kd_barang']) : '';
+    
+    if (empty($kd_barang)) {
+        echo json_encode(['success' => false, 'message' => 'Kode barang tidak valid!']);
+        exit();
+    }
+    
+    // Cari lokasi gudang (asal)
+    $query_gudang = "SELECT KD_LOKASI FROM MASTER_LOKASI WHERE TYPE_LOKASI = 'gudang' AND STATUS = 'AKTIF' LIMIT 1";
+    $result_gudang = $conn->query($query_gudang);
+    if ($result_gudang->num_rows == 0) {
+        echo json_encode(['success' => false, 'message' => 'Tidak ada gudang aktif!']);
+        exit();
+    }
+    $gudang = $result_gudang->fetch_assoc();
+    $kd_lokasi_gudang = $gudang['KD_LOKASI'];
+    
+    // Query untuk mendapatkan batch expired (per ID_PESAN_BARANG dan TGL_EXPIRED)
+    // Hanya ambil yang STATUS = 'SELESAI' dan SISA_STOCK_DUS > 0
+    // Sort dari expired date terdekat
+    $query_batch = "SELECT 
+        pb.ID_PESAN_BARANG,
+        pb.TGL_EXPIRED,
+        pb.SISA_STOCK_DUS,
+        COALESCE(ms.KD_SUPPLIER, '-') as SUPPLIER_KD,
+        COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER
+    FROM PESAN_BARANG pb
+    LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
+    WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.STATUS = 'SELESAI' AND pb.SISA_STOCK_DUS > 0
+    ORDER BY 
+        CASE 
+            WHEN pb.TGL_EXPIRED IS NULL THEN 999
+            WHEN pb.TGL_EXPIRED < CURDATE() THEN 1
+            WHEN pb.TGL_EXPIRED = CURDATE() THEN 2
+            WHEN pb.TGL_EXPIRED <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 3
+            ELSE 4
+        END ASC,
+        COALESCE(pb.TGL_EXPIRED, '9999-12-31') ASC";
+    $stmt_batch = $conn->prepare($query_batch);
+    $stmt_batch->bind_param("ss", $kd_barang, $kd_lokasi_gudang);
+    $stmt_batch->execute();
+    $result_batch = $stmt_batch->get_result();
+    
+    $batches = [];
+    while ($row = $result_batch->fetch_assoc()) {
+        $supplier_display = '';
+        if ($row['SUPPLIER_KD'] != '-' && $row['NAMA_SUPPLIER'] != '-') {
+            $supplier_display = $row['SUPPLIER_KD'] . ' - ' . $row['NAMA_SUPPLIER'];
+        } else {
+            $supplier_display = '-';
+        }
+        
+        // Format tanggal expired
+        $tgl_expired_display = '-';
+        if (!empty($row['TGL_EXPIRED'])) {
+            $date_expired = new DateTime($row['TGL_EXPIRED']);
+            $bulan = [
+                1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
+                5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
+                9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
+            ];
+            $tgl_expired_display = $date_expired->format('d') . ' ' . $bulan[(int)$date_expired->format('m')] . ' ' . $date_expired->format('Y');
+        }
+        
+        $batches[] = [
+            'id_pesan_barang' => $row['ID_PESAN_BARANG'],
+            'tgl_expired' => $row['TGL_EXPIRED'],
+            'tgl_expired_display' => $tgl_expired_display,
+            'sisa_stock_dus' => intval($row['SISA_STOCK_DUS']),
+            'supplier' => $supplier_display
+        ];
+    }
+    
+    echo json_encode(['success' => true, 'batches' => $batches]);
+    exit();
+}
+
 // Handle AJAX request untuk get data barang yang dipilih untuk resupply
 if (isset($_GET['get_resupply_data']) && $_GET['get_resupply_data'] == '1') {
     header('Content-Type: application/json');
@@ -455,13 +536,49 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             throw new Exception('Gagal insert transfer: ' . $stmt_transfer->error);
         }
         
-        // Insert DETAIL_TRANSFER_BARANG untuk setiap barang
+        // Insert DETAIL_TRANSFER_BARANG untuk setiap barang dan kurangi SISA_STOCK_DUS di PESAN_BARANG
         foreach ($resupply_data as $item) {
             $kd_barang = $item['kd_barang'] ?? '';
             $jumlah_resupply_dus = intval($item['jumlah_resupply_dus'] ?? 0);
+            $batches = isset($item['batches']) && is_array($item['batches']) ? $item['batches'] : [];
             
             if (empty($kd_barang) || $jumlah_resupply_dus <= 0) {
                 continue; // Skip invalid data
+            }
+            
+            // Validasi batch dan simpan ke tabel DETAIL_TRANSFER_BARANG_BATCH
+            // TIDAK mengurangi SISA_STOCK_DUS di sini, akan dikurangi saat validasi kirim di gudang
+            foreach ($batches as $batch) {
+                $id_pesan_barang = $batch['id_pesan_barang'] ?? '';
+                $jumlah_dus_batch = intval($batch['jumlah_dus'] ?? 0);
+                
+                if (empty($id_pesan_barang) || $jumlah_dus_batch <= 0) {
+                    continue;
+                }
+                
+                // Cek apakah batch masih memiliki sisa stock yang cukup
+                $query_check_batch = "SELECT SISA_STOCK_DUS FROM PESAN_BARANG WHERE ID_PESAN_BARANG = ? AND KD_LOKASI = ? AND STATUS = 'SELESAI'";
+                $stmt_check_batch = $conn->prepare($query_check_batch);
+                if (!$stmt_check_batch) {
+                    throw new Exception('Gagal prepare query check batch: ' . $conn->error);
+                }
+                $stmt_check_batch->bind_param("ss", $id_pesan_barang, $kd_lokasi_asal);
+                if (!$stmt_check_batch->execute()) {
+                    throw new Exception('Gagal execute query check batch: ' . $stmt_check_batch->error);
+                }
+                $result_check_batch = $stmt_check_batch->get_result();
+                
+                if ($result_check_batch->num_rows > 0) {
+                    $batch_data = $result_check_batch->fetch_assoc();
+                    $sisa_stock_dus = intval($batch_data['SISA_STOCK_DUS'] ?? 0);
+                    
+                    // Validasi sisa stock cukup (hanya validasi, tidak kurangi dulu)
+                    if ($sisa_stock_dus < $jumlah_dus_batch) {
+                        throw new Exception('Sisa stock batch ' . $id_pesan_barang . ' tidak mencukupi! Sisa: ' . $sisa_stock_dus . ' dus, Butuh: ' . $jumlah_dus_batch . ' dus');
+                    }
+                } else {
+                    throw new Exception('Batch ' . $id_pesan_barang . ' tidak ditemukan atau tidak valid!');
+                }
             }
             
             // Generate ID detail transfer
@@ -471,7 +588,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             } while (checkUUIDExists($conn, 'DETAIL_TRANSFER_BARANG', 'ID_DETAIL_TRANSFER_BARANG', $id_detail));
             
             $insert_detail = "INSERT INTO DETAIL_TRANSFER_BARANG 
-                             (ID_DETAIL_TRANSFER_BARANG, ID_TRANSFER_BARANG, KD_BARANG, JUMLAH_PESAN_TRANSFER_DUS, STATUS)
+                             (ID_DETAIL_TRANSFER_BARANG, ID_TRANSFER_BARANG, KD_BARANG, TOTAL_PESAN_TRANSFER_DUS, STATUS)
                              VALUES (?, ?, ?, ?, 'DIPESAN')";
             $stmt_detail = $conn->prepare($insert_detail);
             if (!$stmt_detail) {
@@ -480,6 +597,34 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             $stmt_detail->bind_param("sssi", $id_detail, $id_transfer, $kd_barang, $jumlah_resupply_dus);
             if (!$stmt_detail->execute()) {
                 throw new Exception('Gagal insert detail transfer: ' . $stmt_detail->error);
+            }
+            
+            // Simpan batch ke tabel DETAIL_TRANSFER_BARANG_BATCH
+            foreach ($batches as $batch) {
+                $id_pesan_barang = $batch['id_pesan_barang'] ?? '';
+                $jumlah_dus_batch = intval($batch['jumlah_dus'] ?? 0);
+                
+                if (empty($id_pesan_barang) || $jumlah_dus_batch <= 0) {
+                    continue;
+                }
+                
+                // Generate ID detail transfer batch
+                $id_detail_batch = '';
+                do {
+                    $id_detail_batch = ShortIdGenerator::generate(16, '');
+                } while (checkUUIDExists($conn, 'DETAIL_TRANSFER_BARANG_BATCH', 'ID_DETAIL_TRANSFER_BARANG_BATCH', $id_detail_batch));
+                
+                $insert_detail_batch = "INSERT INTO DETAIL_TRANSFER_BARANG_BATCH 
+                                       (ID_DETAIL_TRANSFER_BARANG_BATCH, ID_DETAIL_TRANSFER_BARANG, ID_PESAN_BARANG, JUMLAH_PESAN_TRANSFER_BATCH_DUS)
+                                       VALUES (?, ?, ?, ?)";
+                $stmt_detail_batch = $conn->prepare($insert_detail_batch);
+                if (!$stmt_detail_batch) {
+                    throw new Exception('Gagal prepare query detail batch: ' . $conn->error);
+                }
+                $stmt_detail_batch->bind_param("sssi", $id_detail_batch, $id_detail, $id_pesan_barang, $jumlah_dus_batch);
+                if (!$stmt_detail_batch->execute()) {
+                    throw new Exception('Gagal insert detail batch: ' . $stmt_detail_batch->error);
+                }
             }
         }
         
@@ -761,7 +906,8 @@ $active_page = 'stock';
                                     <th>Stock Max (pieces)</th>
                                     <th>Stock Sekarang (pieces)</th>
                                     <th>Satuan per dus</th>
-                                    <th>Jumlah Resupply (dus)</th>
+                                    <th>Pilih Batch</th>
+                                    <th>Total Resupply (dus)</th>
                                     <th>Jumlah Resupply (piece)</th>
                                     <th>Jumlah Stock Akhir (piece)</th>
                                     <th>Isi Penuh</th>
@@ -769,7 +915,7 @@ $active_page = 'stock';
                             </thead>
                             <tbody id="tbodyResupply">
                                 <tr>
-                                    <td colspan="13" class="text-center text-muted">Pilih barang dari tabel utama terlebih dahulu</td>
+                                    <td colspan="14" class="text-center text-muted">Pilih barang dari tabel utama terlebih dahulu</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -839,7 +985,99 @@ $active_page = 'stock';
             
             // Reset modal resupply saat ditutup
             $('#modalResupply').on('hidden.bs.modal', function() {
-                $('#tbodyResupply').html('<tr><td colspan="13" class="text-center text-muted">Pilih barang dari tabel utama terlebih dahulu</td></tr>');
+                $('#tbodyResupply').html('<tr><td colspan="14" class="text-center text-muted">Pilih barang dari tabel utama terlebih dahulu</td></tr>');
+            });
+            
+            // Event listener global untuk remove batch (menggunakan event delegation)
+            $(document).on('click', '.remove-batch', function() {
+                var idPesan = $(this).data('id-pesan');
+                var rowIndex = $(this).data('index');
+                $(this).closest('.selected-batches').find('[data-id-pesan="' + idPesan + '"]').remove();
+                
+                if (rowIndex !== undefined && rowIndex !== null) {
+                    updateTotalJumlahResupply(rowIndex);
+                }
+            });
+            
+            // Event listener global untuk input jumlah per batch (menggunakan event delegation)
+            // Hanya update total, jangan ubah nilai input
+            // Event listener untuk input batch - hanya update total, jangan ubah nilai
+            var batchInputHandlers = {};
+            $(document).on('input', '.batch-jumlah', function(e) {
+                e.stopPropagation();
+                var $input = $(this);
+                var rowIndex = $input.data('index');
+                var inputId = $input.data('id-pesan') + '_' + rowIndex;
+                
+                // Simpan nilai saat ini
+                var currentVal = $input.val();
+                
+                // Clear timeout sebelumnya
+                if (batchInputHandlers[inputId]) {
+                    clearTimeout(batchInputHandlers[inputId]);
+                }
+                
+                // Hanya update total, jangan ubah nilai input
+                if (rowIndex !== undefined && rowIndex !== null && !isNaN(rowIndex)) {
+                    // Update total dengan delay untuk menghindari konflik
+                    batchInputHandlers[inputId] = setTimeout(function() {
+                        // Pastikan nilai masih sama sebelum update
+                        if ($input.val() === currentVal) {
+                            updateTotalJumlahResupply(rowIndex);
+                        }
+                    }, 100);
+                }
+            });
+            
+            // Event listener untuk blur (saat user selesai mengetik) - untuk validasi
+            $(document).on('blur', '.batch-jumlah', function(e) {
+                e.stopPropagation();
+                var $input = $(this);
+                var idPesan = $input.data('id-pesan');
+                var rowIndex = $input.data('index');
+                var currentValue = $input.val();
+                
+                // Simpan nilai asli sebelum validasi
+                var originalValue = currentValue;
+                
+                // Jika kosong, set ke 0
+                if (currentValue === '' || currentValue === null || currentValue === undefined) {
+                    $input.val(0);
+                    currentValue = '0';
+                }
+                
+                var jumlah = parseInt(currentValue) || 0;
+                
+                // Cari parent div yang memiliki data-sisa-stock
+                var parentDiv = $input.closest('[data-id-pesan="' + idPesan + '"]');
+                var maxJumlah = parseInt(parentDiv.data('sisa-stock')) || 0;
+                
+                // Validasi tidak boleh negatif
+                if (jumlah < 0 || isNaN(jumlah)) {
+                    $input.val(0);
+                    jumlah = 0;
+                }
+                
+                // Validasi tidak boleh melebihi sisa stock
+                if (jumlah > maxJumlah) {
+                    $input.val(maxJumlah);
+                    jumlah = maxJumlah;
+                }
+                
+                // Pastikan nilai tidak berubah secara tidak sengaja
+                if ($input.val() !== originalValue && originalValue !== '' && originalValue !== null && originalValue !== undefined) {
+                    // Jika nilai berubah karena validasi, pastikan perubahan itu valid
+                    var finalValue = parseInt($input.val()) || 0;
+                    if (finalValue === 0 && parseInt(originalValue) > 0) {
+                        // Jangan reset ke 0 jika user sudah input nilai > 0
+                        $input.val(originalValue);
+                    }
+                }
+                
+                // Update total jumlah resupply setelah validasi
+                if (rowIndex !== undefined && rowIndex !== null && !isNaN(rowIndex)) {
+                    updateTotalJumlahResupply(rowIndex);
+                }
             });
 
             // Load stock data when barang is selected
@@ -1037,88 +1275,401 @@ $active_page = 'stock';
             tbody.empty();
             
             if (data.length === 0) {
-                tbody.append('<tr><td colspan="13" class="text-center text-muted">Tidak ada data</td></tr>');
+                tbody.append('<tr><td colspan="14" class="text-center text-muted">Tidak ada data</td></tr>');
                 return;
             }
             
             data.forEach(function(item, index) {
-                var row = '<tr data-kd-barang="' + escapeHtml(item.kd_barang) + '">' +
-                    '<td>' + escapeHtml(item.kd_barang) + '</td>' +
-                    '<td>' + escapeHtml(item.nama_merek) + '</td>' +
-                    '<td>' + escapeHtml(item.nama_kategori) + '</td>' +
-                    '<td>' + escapeHtml(item.nama_barang) + '</td>' +
-                    '<td>' + numberFormat(item.berat) + '</td>' +
-                    '<td>' + (item.stock_min ? numberFormat(item.stock_min) : '-') + '</td>' +
-                    '<td>' + (item.stock_max ? numberFormat(item.stock_max) : '-') + '</td>' +
-                    '<td>' + numberFormat(item.stock_sekarang) + '</td>' +
-                    '<td>' + numberFormat(item.satuan_perdus) + '</td>' +
-                    '<td><input type="number" class="form-control form-control-sm jumlah-resupply-dus" min="0" value="0" data-index="' + index + '" style="width: 80px;"></td>' +
-                    '<td class="jumlah-resupply-piece" data-index="' + index + '">0</td>' +
-                    '<td class="jumlah-stock-akhir" data-index="' + index + '">' + numberFormat(item.stock_sekarang) + '</td>' +
-                    '<td><input type="checkbox" class="form-check-input isi-penuh" data-index="' + index + '" data-stock-max="' + item.stock_max + '" data-stock-sekarang="' + item.stock_sekarang + '" data-satuan-perdus="' + item.satuan_perdus + '" data-stock-gudang="' + (item.stock_gudang || 0) + '" data-satuan-gudang="' + (item.satuan_gudang || 'PIECES') + '"></td>' +
-                    '</tr>';
-                tbody.append(row);
+                // Load batch expired untuk setiap barang
+                loadBatchExpired(item.kd_barang, index, item);
+            });
+        }
+        
+        function loadBatchExpired(kdBarang, index, itemData) {
+            $.ajax({
+                url: '',
+                method: 'GET',
+                data: {
+                    get_batch_expired: '1',
+                    kd_barang: kdBarang
+                },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.success) {
+                        renderRowWithBatch(itemData, index, response.batches);
+                    } else {
+                        // Jika tidak ada batch, render row tanpa batch
+                        renderRowWithBatch(itemData, index, []);
+                    }
+                },
+                error: function() {
+                    // Jika error, render row tanpa batch
+                    renderRowWithBatch(itemData, index, []);
+                }
+            });
+        }
+        
+        function renderRowWithBatch(item, index, batches) {
+            var tbody = $('#tbodyResupply');
+            
+            // Simpan data batches di row untuk akses nanti
+            var batchesJson = JSON.stringify(batches);
+            
+            // Buat dropdown batch
+            var batchSelect = '<select class="form-select form-select-sm batch-select" data-index="' + index + '" style="width: 200px; min-width: 150px;">' +
+                '<option value="">-- Pilih Batch --</option>';
+            
+            batches.forEach(function(batch) {
+                var batchLabel = batch.id_pesan_barang + ' | Exp: ' + batch.tgl_expired_display + ' | Sisa: ' + numberFormat(batch.sisa_stock_dus) + ' dus';
+                batchSelect += '<option value="' + escapeHtml(batch.id_pesan_barang) + '" data-sisa-stock="' + batch.sisa_stock_dus + '" data-tgl-expired="' + escapeHtml(batch.tgl_expired || '') + '">' + escapeHtml(batchLabel) + '</option>';
             });
             
-            // Attach event listeners
+            batchSelect += '</select>';
+            
+            // Buat container untuk batch yang dipilih dan input jumlah per batch
+            var batchContainer = '<div class="batch-container" data-index="' + index + '">' +
+                batchSelect +
+                '<div class="selected-batches mt-2" data-index="' + index + '"></div>' +
+                '</div>';
+            
+            // Buat row menggunakan jQuery untuk menyimpan data batches dengan benar
+            var $row = $('<tr>', {
+                'data-kd-barang': item.kd_barang
+            });
+            
+            // Simpan batches data sebagai JSON string di attribute
+            $row.attr('data-batches', batchesJson);
+            
+            // Tambahkan kolom-kolom
+            $row.append(
+                $('<td>').text(item.kd_barang),
+                $('<td>').text(item.nama_merek),
+                $('<td>').text(item.nama_kategori),
+                $('<td>').text(item.nama_barang),
+                $('<td>').text(numberFormat(item.berat)),
+                $('<td>').text(item.stock_min ? numberFormat(item.stock_min) : '-'),
+                $('<td>').text(item.stock_max ? numberFormat(item.stock_max) : '-'),
+                $('<td>').text(numberFormat(item.stock_sekarang)),
+                $('<td>').text(numberFormat(item.satuan_perdus)),
+                $('<td>').html(batchContainer),
+                $('<td>').html('<input type="text" class="form-control form-control-sm jumlah-resupply-dus" value="0" data-index="' + index + '" style="width: 80px; background-color: #e9ecef; cursor: not-allowed;" readonly disabled>'),
+                $('<td>', {
+                    'class': 'jumlah-resupply-piece',
+                    'data-index': index
+                }).text('0'),
+                $('<td>', {
+                    'class': 'jumlah-stock-akhir',
+                    'data-index': index
+                }).text(numberFormat(item.stock_sekarang)),
+                $('<td>').html('<input type="checkbox" class="form-check-input isi-penuh" data-index="' + index + '" data-stock-max="' + item.stock_max + '" data-stock-sekarang="' + item.stock_sekarang + '" data-satuan-perdus="' + item.satuan_perdus + '" data-stock-gudang="' + (item.stock_gudang || 0) + '" data-satuan-gudang="' + (item.satuan_gudang || 'PIECES') + '">')
+            );
+            
+            tbody.append($row);
+            
+            // Attach event listeners untuk batch select
+            attachBatchEventListeners(index);
+            
+            // Attach event listeners untuk resupply
             attachResupplyEventListeners();
         }
         
-        function attachResupplyEventListeners() {
-            // Event listener untuk input jumlah resupply (dus)
-            $(document).off('input', '.jumlah-resupply-dus').on('input', '.jumlah-resupply-dus', function() {
-                var index = $(this).data('index');
-                calculateResupply(index);
+        function attachBatchEventListeners(index) {
+            // Event listener untuk memilih batch
+            $(document).off('change', '.batch-select[data-index="' + index + '"]').on('change', '.batch-select[data-index="' + index + '"]', function() {
+                var selectedOption = $(this).find('option:selected');
+                var idPesanBarang = selectedOption.val();
+                var sisaStock = parseInt(selectedOption.data('sisa-stock')) || 0;
+                var tglExpired = selectedOption.data('tgl-expired') || '';
+                
+                if (!idPesanBarang) {
+                    return;
+                }
+                
+                // Cek apakah batch sudah dipilih sebelumnya
+                var batchContainer = $(this).closest('.batch-container').find('.selected-batches');
+                var existingBatch = batchContainer.find('[data-id-pesan="' + escapeHtml(idPesanBarang) + '"]');
+                
+                if (existingBatch.length > 0) {
+                    // Batch sudah dipilih, tidak perlu ditambahkan lagi
+                    $(this).val('');
+                    return;
+                }
+                
+                // Format tanggal expired untuk display
+                var tglExpiredDisplay = '-';
+                if (tglExpired) {
+                    var dateExpired = new Date(tglExpired);
+                    var bulan = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+                    tglExpiredDisplay = dateExpired.getDate() + ' ' + bulan[dateExpired.getMonth()] + ' ' + dateExpired.getFullYear();
+                }
+                
+                // Tambahkan batch yang dipilih
+                var batchItem = $('<div>', {
+                    'class': 'd-flex align-items-center gap-2 mb-2 p-2 border rounded',
+                    'data-id-pesan': idPesanBarang,
+                    'data-sisa-stock': sisaStock
+                });
+                
+                var batchInfo = $('<div>', {
+                    'class': 'flex-grow-1'
+                }).append(
+                    $('<small>', {
+                        'class': 'd-block fw-bold',
+                        'text': idPesanBarang
+                    })
+                ).append(
+                    $('<small>', {
+                        'class': 'text-muted',
+                        'text': 'Exp: ' + tglExpiredDisplay + ' | Sisa: ' + numberFormat(sisaStock) + ' dus'
+                    })
+                );
+                
+                var batchInput = $('<input>', {
+                    'type': 'number',
+                    'class': 'form-control form-control-sm batch-jumlah',
+                    'min': 0,
+                    'max': sisaStock,
+                    'value': 0,
+                    'step': 1,
+                    'style': 'width: 80px;',
+                    'data-id-pesan': idPesanBarang,
+                    'data-index': index
+                });
+                
+                var removeBtn = $('<button>', {
+                    'type': 'button',
+                    'class': 'btn btn-sm btn-danger remove-batch',
+                    'data-id-pesan': idPesanBarang,
+                    'data-index': index,
+                    'text': '×'
+                });
+                
+                batchItem.append(batchInfo).append(batchInput).append(removeBtn);
+                batchContainer.append(batchItem);
+                
+                // Reset select
+                $(this).val('');
+                
+                // Update total jumlah resupply
+                updateTotalJumlahResupply(index);
+            });
+        }
+        
+        function updateTotalJumlahResupply(index) {
+            var row = $('tr[data-kd-barang]').eq(index);
+            if (row.length === 0) return; // Row tidak ditemukan
+            
+            var batchContainer = row.find('.batch-container[data-index="' + index + '"]');
+            var selectedBatches = batchContainer.find('.selected-batches');
+            
+            // Hitung total dari semua batch yang dipilih
+            var totalDus = 0;
+            selectedBatches.find('.batch-jumlah').each(function() {
+                var $input = $(this);
+                // Ambil nilai langsung dari input, jangan parse dulu untuk menghindari kehilangan nilai
+                var val = $input.val();
+                // Pastikan nilai tidak kosong atau null
+                if (val !== '' && val !== null && val !== undefined) {
+                    var jumlah = parseInt(val) || 0;
+                    if (!isNaN(jumlah)) {
+                        totalDus += jumlah;
+                    }
+                }
             });
             
-            // Event listener untuk checkbox "Isi Penuh"
-            $(document).off('change', '.isi-penuh').on('change', '.isi-penuh', function() {
-                var index = $(this).data('index');
-                var stockMax = parseInt($(this).data('stock-max')) || 0;
-                var stockSekarang = parseInt($(this).data('stock-sekarang')) || 0;
-                var satuanPerdus = parseInt($(this).data('satuan-perdus')) || 1;
+            // Update input total resupply (dus) - readonly, hanya untuk display
+            // Jangan ubah nilai input batch, hanya update total
+            var $totalInput = row.find('.jumlah-resupply-dus[data-index="' + index + '"]');
+            if ($totalInput.length > 0) {
+                // Pastikan input tetap disabled/readonly
+                $totalInput.prop('disabled', true);
+                $totalInput.prop('readonly', true);
+                $totalInput.val(totalDus);
+            }
+            
+            // Hitung ulang resupply
+            calculateResupply(index);
+        }
+        
+        function isiPenuhOtomatis(index) {
+            var row = $('tr[data-kd-barang]').eq(index);
+            var stockMax = parseInt(row.find('.isi-penuh').data('stock-max')) || 0;
+            var stockSekarang = parseInt(row.find('.isi-penuh').data('stock-sekarang')) || 0;
+            var satuanPerdus = parseInt(row.find('.isi-penuh').data('satuan-perdus')) || 1;
+            
+            // Hitung kebutuhan dalam pieces
+            var kebutuhanPieces = stockMax - stockSekarang;
+            
+            if (kebutuhanPieces <= 0) {
+                Swal.fire({
+                    icon: 'info',
+                    title: 'Info',
+                    text: 'Stock sudah mencapai maksimum atau melebihi maksimum.',
+                    confirmButtonColor: '#667eea'
+                });
+                row.find('.isi-penuh').prop('checked', false);
+                return;
+            }
+            
+            // Konversi kebutuhan ke dus (pembulatan ke atas)
+            var kebutuhanDus = Math.ceil(kebutuhanPieces / satuanPerdus);
+            
+            // Ambil data batches dari row
+            var batchesJson = row.attr('data-batches');
+            if (!batchesJson || batchesJson.length === 0) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Peringatan!',
+                    text: 'Tidak ada batch tersedia untuk barang ini.',
+                    confirmButtonColor: '#667eea'
+                });
+                row.find('.isi-penuh').prop('checked', false);
+                return;
+            }
+            
+            // Parse JSON batches
+            var batches;
+            try {
+                batches = JSON.parse(batchesJson);
+            } catch (e) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error!',
+                    text: 'Gagal memproses data batch.',
+                    confirmButtonColor: '#e74c3c'
+                });
+                row.find('.isi-penuh').prop('checked', false);
+                return;
+            }
+            
+            if (!batches || batches.length === 0) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Peringatan!',
+                    text: 'Tidak ada batch tersedia untuk barang ini.',
+                    confirmButtonColor: '#667eea'
+                });
+                row.find('.isi-penuh').prop('checked', false);
+                return;
+            }
+            
+            // Sort batch berdasarkan expired date (terdekat dulu)
+            batches.sort(function(a, b) {
+                // Batch dengan expired date null atau kosong dianggap paling akhir
+                if (!a.tgl_expired && !b.tgl_expired) return 0;
+                if (!a.tgl_expired) return 1;
+                if (!b.tgl_expired) return -1;
                 
-                if ($(this).is(':checked')) {
-                    // Hitung jumlah dus yang membuat jumlah akhir (piece) sampai stock max (boleh sama dengan stock max, tidak boleh melebihi)
-                    // Maksimal pieces yang bisa di-resupply = Stock Max - Stock Sekarang
-                    var maksimalPieces = stockMax - stockSekarang;
-                    
-                    // Jika maksimalPieces <= 0, berarti sudah mencapai atau melebihi stock max
-                    if (maksimalPieces <= 0) {
-                        // Konfirmasi apakah tetap ingin mengisi penuh meskipun sudah mencapai stock max
-                        Swal.fire({
-                            icon: 'question',
-                            title: 'Konfirmasi',
-                            text: 'Stock sudah mencapai atau melebihi Stock Max. Apakah Anda tetap ingin mengisi penuh?',
-                            showCancelButton: true,
-                            confirmButtonText: 'Ya, Isi Penuh',
-                            cancelButtonText: 'Batal',
-                            confirmButtonColor: '#667eea',
-                            cancelButtonColor: '#6c757d'
-                        }).then((result) => {
-                            if (result.isConfirmed) {
-                                // Set jumlah dus = 0 (karena sudah mencapai max)
-                                $('.jumlah-resupply-dus[data-index="' + index + '"]').val(0);
-                                calculateResupply(index);
-                            } else {
-                                // Uncheck checkbox
-                                $(this).prop('checked', false);
-                            }
-                        });
-                        return;
-                    }
-                    
-                    // Hitung jumlah dus: floor(maksimalPieces / satuanPerdus)
-                    // Ini akan menghasilkan jumlah dus yang membuat stock akhir <= stock max
-                    var jumlahDus = Math.floor(maksimalPieces / satuanPerdus);
-                    
-                    // Set nilai input
-                    $('.jumlah-resupply-dus[data-index="' + index + '"]').val(jumlahDus);
-                    calculateResupply(index);
+                var dateA = new Date(a.tgl_expired);
+                var dateB = new Date(b.tgl_expired);
+                return dateA - dateB;
+            });
+            
+            // Bersihkan batch yang sudah dipilih sebelumnya
+            var batchContainer = row.find('.batch-container[data-index="' + index + '"]');
+            var selectedBatches = batchContainer.find('.selected-batches');
+            selectedBatches.empty();
+            
+            // Pilih batch secara otomatis dan isi jumlahnya
+            var sisaKebutuhan = kebutuhanDus;
+            var batchDipilih = false;
+            
+            for (var i = 0; i < batches.length && sisaKebutuhan > 0; i++) {
+                var batch = batches[i];
+                var sisaStockBatch = batch.sisa_stock_dus;
+                
+                if (sisaStockBatch <= 0) {
+                    continue; // Skip batch yang tidak ada stock
+                }
+                
+                // Hitung berapa yang akan diambil dari batch ini
+                var jumlahAmbil = Math.min(sisaStockBatch, sisaKebutuhan);
+                
+                // Tambahkan batch ke selected batches
+                var tglExpiredDisplay = batch.tgl_expired_display || '-';
+                if (batch.tgl_expired) {
+                    var dateExpired = new Date(batch.tgl_expired);
+                    var bulan = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+                    tglExpiredDisplay = dateExpired.getDate() + ' ' + bulan[dateExpired.getMonth()] + ' ' + dateExpired.getFullYear();
+                }
+                
+                var batchItem = $('<div>', {
+                    'class': 'd-flex align-items-center gap-2 mb-2 p-2 border rounded',
+                    'data-id-pesan': batch.id_pesan_barang,
+                    'data-sisa-stock': sisaStockBatch
+                });
+                
+                var batchInfo = $('<div>', {
+                    'class': 'flex-grow-1'
+                }).append(
+                    $('<small>', {
+                        'class': 'd-block fw-bold',
+                        'text': batch.id_pesan_barang
+                    })
+                ).append(
+                    $('<small>', {
+                        'class': 'text-muted',
+                        'text': 'Exp: ' + tglExpiredDisplay + ' | Sisa: ' + numberFormat(sisaStockBatch) + ' dus'
+                    })
+                );
+                
+                var batchInput = $('<input>', {
+                    'type': 'number',
+                    'class': 'form-control form-control-sm batch-jumlah',
+                    'min': 0,
+                    'max': sisaStockBatch,
+                    'value': jumlahAmbil,
+                    'step': 1,
+                    'style': 'width: 80px;',
+                    'data-id-pesan': batch.id_pesan_barang,
+                    'data-index': index
+                });
+                
+                var removeBtn = $('<button>', {
+                    'type': 'button',
+                    'class': 'btn btn-sm btn-danger remove-batch',
+                    'data-id-pesan': batch.id_pesan_barang,
+                    'data-index': index,
+                    'text': '×'
+                });
+                
+                batchItem.append(batchInfo).append(batchInput).append(removeBtn);
+                selectedBatches.append(batchItem);
+                
+                sisaKebutuhan -= jumlahAmbil;
+                batchDipilih = true;
+            }
+            
+            if (!batchDipilih || sisaKebutuhan > 0) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Peringatan!',
+                    text: 'Stock batch tidak mencukupi untuk mengisi penuh. Batch yang tersedia telah dipilih.',
+                    confirmButtonColor: '#667eea'
+                });
+            }
+            
+            // Update total jumlah resupply
+            updateTotalJumlahResupply(index);
+        }
+        
+        function attachResupplyEventListeners() {
+            // Event listener untuk checkbox "Isi Penuh"
+            // Catatan: Input jumlah-resupply-dus sudah readonly, tidak perlu event listener
+            $(document).off('change', '.isi-penuh').on('change', '.isi-penuh', function() {
+                var $checkbox = $(this);
+                var index = $checkbox.data('index');
+                
+                if ($checkbox.is(':checked')) {
+                    // Fungsi "Isi Penuh" - otomatis pilih batch dan isi jumlah
+                    isiPenuhOtomatis(index);
                 } else {
-                    // Reset ke 0
-                    $('.jumlah-resupply-dus[data-index="' + index + '"]').val(0);
-                    calculateResupply(index);
+                    // Saat uncheck, jangan reset batch yang sudah dipilih
+                    // Biarkan batch dan jumlah tetap ada, hanya update total
+                    var row = $('tr[data-kd-barang]').eq(index);
+                    if (row.length > 0) {
+                        updateTotalJumlahResupply(index);
+                    }
                 }
             });
         }
@@ -1175,9 +1726,25 @@ $active_page = 'stock';
                         exceedItems.push(namaBarang + ' (Stock akhir: ' + numberFormat(stockAkhir) + ', Stock Max: ' + numberFormat(stockMax) + ')');
                     }
                     
+                    // Kumpulkan data batch untuk barang ini
+                    var batches = [];
+                    var batchContainer = $(this).find('.batch-container');
+                    batchContainer.find('.selected-batches .batch-jumlah').each(function() {
+                        var idPesanBarang = $(this).data('id-pesan');
+                        var jumlahBatch = parseInt($(this).val()) || 0;
+                        
+                        if (jumlahBatch > 0) {
+                            batches.push({
+                                id_pesan_barang: idPesanBarang,
+                                jumlah_dus: jumlahBatch
+                            });
+                        }
+                    });
+                    
                     resupplyData.push({
                         kd_barang: kdBarang,
-                        jumlah_resupply_dus: jumlahDus
+                        jumlah_resupply_dus: jumlahDus,
+                        batches: batches
                     });
                 }
             });

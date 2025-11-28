@@ -106,9 +106,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
 $query_riwayat = "SELECT 
     dtb.ID_DETAIL_TRANSFER_BARANG,
     dtb.ID_TRANSFER_BARANG,
-    dtb.JUMLAH_PESAN_TRANSFER_DUS,
-    dtb.JUMLAH_KIRIM_DUS,
-    dtb.JUMLAH_DITOLAK_DUS,
+    dtb.TOTAL_PESAN_TRANSFER_DUS,
+    dtb.TOTAL_KIRIM_DUS,
+    dtb.TOTAL_DITOLAK_DUS,
     dtb.TOTAL_MASUK_DUS,
     dtb.STATUS as STATUS_DETAIL,
     tb.WAKTU_PESAN_TRANSFER,
@@ -249,11 +249,10 @@ $active_page = 'stock';
                             <th>Lokasi Awal</th>
                             <th>Lokasi tujuan</th>
                             <th>WAKTU</th>
-                            <th>Jumlah Pesan Transfer</th>
-                            <th>Total Masuk</th>
-                            <th>Jumlah Dikirim</th>
-                            <th>Jumlah Ditolak</th>
-                            <th>Satuan</th>
+                            <th>Total Pesan Transfer (dus)</th>
+                            <th>Total Masuk (dus)</th>
+                            <th>Total Dikirim (dus)</th>
+                            <th>Total Ditolak (dus)</th>
                             <th>STATUS</th>
                             <th>ACTION</th>
                         </tr>
@@ -267,11 +266,10 @@ $active_page = 'stock';
                                     <td><?php echo isset($lokasi_map[$row['KD_LOKASI_ASAL']]) ? htmlspecialchars($lokasi_map[$row['KD_LOKASI_ASAL']]) : htmlspecialchars($row['KD_LOKASI_ASAL']); ?></td>
                                     <td><?php echo isset($lokasi_map[$row['KD_LOKASI_TUJUAN']]) ? htmlspecialchars($lokasi_map[$row['KD_LOKASI_TUJUAN']]) : htmlspecialchars($row['KD_LOKASI_TUJUAN']); ?></td>
                                     <td><?php echo formatWaktuStack($row['WAKTU_PESAN_TRANSFER'], $row['WAKTU_KIRIM_TRANSFER'], $row['WAKTU_SELESAI_TRANSFER'], $row['STATUS_DETAIL']); ?></td>
-                                    <td><?php echo number_format($row['JUMLAH_PESAN_TRANSFER_DUS'], 0, ',', '.'); ?></td>
+                                    <td><?php echo number_format($row['TOTAL_PESAN_TRANSFER_DUS'], 0, ',', '.'); ?></td>
                                     <td><?php echo $row['TOTAL_MASUK_DUS'] ? number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.') : '-'; ?></td>
-                                    <td><?php echo $row['JUMLAH_KIRIM_DUS'] ? number_format($row['JUMLAH_KIRIM_DUS'], 0, ',', '.') : '-'; ?></td>
-                                    <td><?php echo $row['JUMLAH_DITOLAK_DUS'] ? number_format($row['JUMLAH_DITOLAK_DUS'], 0, ',', '.') : '-'; ?></td>
-                                    <td><?php echo htmlspecialchars($row['SATUAN']); ?></td>
+                                    <td><?php echo $row['TOTAL_KIRIM_DUS'] ? number_format($row['TOTAL_KIRIM_DUS'], 0, ',', '.') : '-'; ?></td>
+                                    <td><?php echo $row['TOTAL_DITOLAK_DUS'] ? number_format($row['TOTAL_DITOLAK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td>
                                         <?php 
                                         $status_text = '';
@@ -316,7 +314,7 @@ $active_page = 'stock';
                             <?php endwhile; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="12" class="text-center text-muted">Tidak ada riwayat resupply</td>
+                                <td colspan="11" class="text-center text-muted">Tidak ada riwayat resupply</td>
                             </tr>
                         <?php endif; ?>
                     </tbody>
@@ -368,7 +366,7 @@ $active_page = 'stock';
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
                 order: [[0, 'desc']], // Sort by ID TRANSFER descending
                 columnDefs: [
-                    { orderable: false, targets: [11] } // Disable sorting on Action column
+                    { orderable: false, targets: [10] } // Disable sorting on Action column
                 ],
                 scrollX: true,
                 autoWidth: false
