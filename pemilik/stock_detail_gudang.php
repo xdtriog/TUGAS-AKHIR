@@ -166,48 +166,31 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $stock_sekarang = intval($stock_data['JUMLAH_BARANG']);
             $satuan_perdus = intval($barang_data['SATUAN_PERDUS'] ?? 1);
             
-            // 1. Hitung DEMAND RATE (D) dalam DUS per hari
-            // Prioritas 1: Dari DETAIL_TRANSFER_BARANG_BATCH (transfer dari gudang ke toko)
-            $query_demand_transfer = "SELECT 
-                COALESCE(SUM(dtbb.JUMLAH_MASUK_DUS), 0) as TOTAL_DUS_TRANSFER
-            FROM DETAIL_TRANSFER_BARANG_BATCH dtbb
-            INNER JOIN DETAIL_TRANSFER_BARANG dtb ON dtbb.ID_DETAIL_TRANSFER_BARANG = dtb.ID_DETAIL_TRANSFER_BARANG
-            INNER JOIN TRANSFER_BARANG tb ON dtb.ID_TRANSFER_BARANG = tb.ID_TRANSFER_BARANG
-            WHERE dtb.KD_BARANG = ?
-            AND tb.KD_LOKASI_ASAL = ?
-            AND tb.WAKTU_KIRIM_TRANSFER >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
-            AND tb.WAKTU_KIRIM_TRANSFER <= CURDATE()";
-            $stmt_demand_transfer = $conn->prepare($query_demand_transfer);
-            $stmt_demand_transfer->bind_param("ss", $kd_barang_ajax, $kd_lokasi_ajax);
-            $stmt_demand_transfer->execute();
-            $result_demand_transfer = $stmt_demand_transfer->get_result();
-            $demand_transfer_data = $result_demand_transfer->fetch_assoc();
-            $total_dus_transfer = intval($demand_transfer_data['TOTAL_DUS_TRANSFER'] ?? 0);
-            
-            // Prioritas 2: Dari penjualan toko (DETAIL_NOTA_JUAL → konversi pieces ke dus)
-            $query_demand_sales = "SELECT 
+            // 1. Hitung DEMAND RATE (D) dalam DUS per hari dari penjualan setahun terakhir
+            // Konversi dari penjualan toko: JUMLAH_JUAL_BARANG (pieces) ÷ SATUAN_PERDUS = dus
+            $query_demand = "SELECT 
                 COALESCE(SUM(dnj.JUMLAH_JUAL_BARANG), 0) as TOTAL_PIECES
             FROM DETAIL_NOTA_JUAL dnj
             INNER JOIN NOTA_JUAL nj ON dnj.ID_NOTA_JUAL = nj.ID_NOTA_JUAL
-            WHERE dnj.KD_BARANG = ?
+            WHERE dnj.KD_BARANG = ? 
+            AND nj.KD_LOKASI != ?  -- Penjualan dari toko (bukan gudang)
             AND nj.WAKTU_NOTA >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
             AND nj.WAKTU_NOTA <= CURDATE()";
-            $stmt_demand_sales = $conn->prepare($query_demand_sales);
-            $stmt_demand_sales->bind_param("s", $kd_barang_ajax);
-            $stmt_demand_sales->execute();
-            $result_demand_sales = $stmt_demand_sales->get_result();
-            $demand_sales_data = $result_demand_sales->fetch_assoc();
-            $total_pieces_sales = intval($demand_sales_data['TOTAL_PIECES'] ?? 0);
-            $total_dus_sales = $satuan_perdus > 0 ? round($total_pieces_sales / $satuan_perdus) : 0;
+            $stmt_demand = $conn->prepare($query_demand);
+            $stmt_demand->bind_param("ss", $kd_barang_ajax, $kd_lokasi_ajax);
+            $stmt_demand->execute();
+            $result_demand = $stmt_demand->get_result();
+            $demand_data = $result_demand->fetch_assoc();
+            $total_pieces = intval($demand_data['TOTAL_PIECES'] ?? 0);
             
-            // Gunakan yang lebih besar antara transfer atau penjualan
-            $total_dus_terjual = max($total_dus_transfer, $total_dus_sales);
+            // Konversi pieces ke dus: TOTAL_PIECES ÷ SATUAN_PERDUS
+            $total_dus_terjual = $satuan_perdus > 0 ? ($total_pieces / $satuan_perdus) : 0;
             
             // Demand rate dalam DUS per hari (untuk 1 tahun = 365 hari)
-            $demand_rate = $total_dus_terjual > 0 ? round($total_dus_terjual / 365) : 1; // Minimum 1 dus/hari jika tidak ada data
+            $demand_rate = $total_dus_terjual > 0 ? ($total_dus_terjual / 365) : 0.01; // Minimum 0.01 dus/hari jika tidak ada data
             
-            // 2. Hitung SETUP COST (S) - Biaya tetap setiap pemesanan
-            // Hanya ambil dari BIAYA_PENGIRIMAAN PESAN_BARANG (jangan pakai biaya operasional)
+            // 2. Hitung SETUP COST (S) - biaya tetap setiap kali pemesanan
+            // Ambil rata-rata BIAYA_PENGIRIMAAN dari PESAN_BARANG (biaya admin + bongkar muat)
             $query_setup = "SELECT 
                 COALESCE(AVG(pb.BIAYA_PENGIRIMAAN), 0) as AVG_BIAYA_PENGIRIMAAN
             FROM PESAN_BARANG pb
@@ -217,14 +200,15 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $stmt_setup->execute();
             $result_setup = $stmt_setup->get_result();
             $setup_data = $result_setup->fetch_assoc();
-            $setup_cost = floatval($setup_data['AVG_BIAYA_PENGIRIMAAN'] ?? 0);
+            $avg_biaya_pengiriman = floatval($setup_data['AVG_BIAYA_PENGIRIMAAN'] ?? 0);
             
             // Jika belum ada data, gunakan default 300000
-            if ($setup_cost <= 0) {
-                $setup_cost = 300000;
+            if ($avg_biaya_pengiriman <= 0) {
+                $avg_biaya_pengiriman = 300000;
             }
+            $setup_cost = $avg_biaya_pengiriman;
             
-            // 3. Hitung HOLDING COST (H) - Rp per DUS per hari
+            // 3. Hitung HOLDING COST (H) - Rp per DUS per hari (CARA PALING AKURAT)
             // a. Hitung total biaya operasional gudang 1 tahun terakhir
             $query_biaya_gudang = "SELECT 
                 SUM(CASE 
@@ -243,15 +227,15 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $biaya_gudang_data = $result_biaya_gudang->fetch_assoc();
             $total_biaya_gudang_tahun = floatval($biaya_gudang_data['TOTAL_BIAYA_GUDANG_TAHUN'] ?? 0);
             
-            // b. Hitung rata-rata jumlah dus yang tersimpan di gudang pusat selama 1 tahun
-            // Ambil dari STOCK_HISTORY (JUMLAH_AKHIR) untuk lokasi gudang, satuan DUS
+            // b. Hitung rata-rata jumlah dus yang tersimpan di gudang selama 1 tahun
+            // Ambil stok akhir setiap hari dari STOCK_HISTORY (untuk gudang, SATUAN = 'DUS')
             $query_avg_stok_dus = "SELECT 
-                COALESCE(AVG(sh.JUMLAH_AKHIR), 0) as AVG_STOK_DUS
+                AVG(sh.JUMLAH_AKHIR) as AVG_STOK_DUS
             FROM STOCK_HISTORY sh
             WHERE sh.KD_LOKASI = ?
             AND sh.SATUAN = 'DUS'
-            AND DATE(sh.WAKTU_CHANGE) >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
-            AND DATE(sh.WAKTU_CHANGE) <= CURDATE()";
+            AND sh.WAKTU_CHANGE >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+            AND sh.JUMLAH_AKHIR >= 0";
             $stmt_avg_stok = $conn->prepare($query_avg_stok_dus);
             $stmt_avg_stok->bind_param("s", $kd_lokasi_ajax);
             $stmt_avg_stok->execute();
@@ -259,12 +243,13 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $avg_stok_data = $result_avg_stok->fetch_assoc();
             $avg_stok_dus = floatval($avg_stok_data['AVG_STOK_DUS'] ?? 0);
             
-            // c. Hitung H per dus per tahun dan per hari
+            // c. H per dus per tahun = Total biaya gudang ÷ Rata-rata stok dus
+            // d. H per dus per hari = H per tahun ÷ 365
             if ($avg_stok_dus > 0 && $total_biaya_gudang_tahun > 0) {
                 $holding_cost_per_dus_per_tahun = $total_biaya_gudang_tahun / $avg_stok_dus;
-                $holding_cost = $holding_cost_per_dus_per_tahun / 365; // H per dus per hari
+                $holding_cost = $holding_cost_per_dus_per_tahun / 365;
             } else {
-                // Fallback: jika tidak ada data, gunakan default 385 per dus per hari
+                // Jika tidak ada data, gunakan default (misal 385 per dus per hari)
                 $holding_cost = 385;
             }
             
@@ -300,12 +285,12 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $has_interval = $interval_data !== null;
             $existing_interval = $interval_data ? intval($interval_data['INTERVAL_HARI']) : null;
             
-            // 6. Hitung INTERVAL POQ
+            // 6. Hitung INTERVAL POQ Optimal (T*) dalam hari
             // Jika interval sudah ada, gunakan yang ada, jika belum hitung baru
             if ($has_interval && $existing_interval > 0) {
                 $interval_hari = $existing_interval;
             } else {
-                // Rumus: √(2 × SETUP_COST / (DEMAND_RATE × HOLDING_COST))
+                // Rumus: T* = √(2 × S / (D × H))
                 if ($demand_rate > 0 && $holding_cost > 0) {
                     $interval_hari = sqrt((2 * $setup_cost) / ($demand_rate * $holding_cost));
                     $interval_hari = round($interval_hari);
@@ -318,8 +303,8 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
                 }
             }
             
-            // 7. Hitung KUANTITAS POQ (Q*) dalam DUS
-            // Rumus: Q* = (D × T*) + (D × LeadTime) - Stok_Sekarang_dus
+            // 7. Hitung KUANTITAS POQ (Q*) yang harus dipesan saat ini
+            // Q* = (D × T*) + (D × LeadTime) - Stok_Sekarang_dus
             $kuantitas_poq_dus = ($demand_rate * $interval_hari) + ($demand_rate * $lead_time) - $stock_sekarang;
             
             // Jika hasil negatif → 0 (tidak perlu pesan)
@@ -405,11 +390,11 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $stock_sekarang = intval($stock_data['JUMLAH_BARANG']);
         
         // Hitung ulang semua variabel POQ (sama seperti di get_poq_data)
-        // 1. Demand Rate
+        // 1. Demand Rate (D) dalam DUS per hari
         $query_demand = "SELECT COALESCE(SUM(dnj.JUMLAH_JUAL_BARANG), 0) as TOTAL_PIECES
                         FROM DETAIL_NOTA_JUAL dnj
                         INNER JOIN NOTA_JUAL nj ON dnj.ID_NOTA_JUAL = nj.ID_NOTA_JUAL
-                        WHERE dnj.KD_BARANG = ? AND nj.KD_LOKASI = ?
+                        WHERE dnj.KD_BARANG = ? AND nj.KD_LOKASI != ?
                         AND nj.WAKTU_NOTA >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)";
         $stmt_demand = $conn->prepare($query_demand);
         $stmt_demand->bind_param("ss", $kd_barang, $kd_lokasi);
@@ -417,9 +402,10 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $result_demand = $stmt_demand->get_result();
         $demand_data = $result_demand->fetch_assoc();
         $total_pieces = intval($demand_data['TOTAL_PIECES'] ?? 0);
-        $demand_rate = $total_pieces > 0 ? round($total_pieces / 365) : 1;
+        $total_dus_terjual = $satuan_perdus > 0 ? ($total_pieces / $satuan_perdus) : 0;
+        $demand_rate = $total_dus_terjual > 0 ? ($total_dus_terjual / 365) : 0.01;
         
-        // 2. Setup Cost
+        // 2. Setup Cost (S) - biaya tetap pemesanan
         $query_setup = "SELECT COALESCE(AVG(pb.BIAYA_PENGIRIMAAN), 0) as AVG_BIAYA
                        FROM PESAN_BARANG pb
                        WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.BIAYA_PENGIRIMAAN > 0";
@@ -430,50 +416,50 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $setup_data = $result_setup->fetch_assoc();
         $setup_cost = floatval($setup_data['AVG_BIAYA'] ?? 0);
         if ($setup_cost <= 0) {
-            $query_biaya_ops = "SELECT AVG(bo.JUMLAH_BIAYA_UANG) as AVG_BIAYA
-                              FROM BIAYA_OPERASIONAL bo
-                              WHERE bo.KD_LOKASI = ? AND bo.PERIODE = 'BULANAN' LIMIT 1";
-            $stmt_biaya_ops = $conn->prepare($query_biaya_ops);
-            $stmt_biaya_ops->bind_param("s", $kd_lokasi);
-            $stmt_biaya_ops->execute();
-            $result_biaya_ops = $stmt_biaya_ops->get_result();
-            if ($result_biaya_ops->num_rows > 0) {
-                $biaya_ops_data = $result_biaya_ops->fetch_assoc();
-                $setup_cost = floatval($biaya_ops_data['AVG_BIAYA'] ?? 0);
-            }
-            if ($setup_cost <= 0) {
-                $setup_cost = 300000;
-            }
+            $setup_cost = 300000;
         }
         
-        // 3. Holding Cost
-        $query_barang_full = "SELECT AVG_HARGA_BELI_PIECES FROM MASTER_BARANG WHERE KD_BARANG = ?";
-        $stmt_barang_full = $conn->prepare($query_barang_full);
-        $stmt_barang_full->bind_param("s", $kd_barang);
-        $stmt_barang_full->execute();
-        $result_barang_full = $stmt_barang_full->get_result();
-        $barang_full_data = $result_barang_full->fetch_assoc();
-        $avg_harga_beli = floatval($barang_full_data['AVG_HARGA_BELI_PIECES'] ?? 0);
+        // 3. Holding Cost (H) - Rp per DUS per hari
+        // a. Total biaya operasional gudang 1 tahun
+        $query_biaya_gudang = "SELECT 
+            SUM(CASE 
+                WHEN bo.PERIODE = 'HARIAN' THEN bo.JUMLAH_BIAYA_UANG * 365
+                WHEN bo.PERIODE = 'BULANAN' THEN bo.JUMLAH_BIAYA_UANG * 12
+                WHEN bo.PERIODE = 'TAHUNAN' THEN bo.JUMLAH_BIAYA_UANG
+                ELSE 0
+            END) as TOTAL_BIAYA_GUDANG_TAHUN
+        FROM BIAYA_OPERASIONAL bo
+        WHERE bo.KD_LOKASI = ?
+        AND bo.LAST_UPDATED >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)";
+        $stmt_biaya_gudang = $conn->prepare($query_biaya_gudang);
+        $stmt_biaya_gudang->bind_param("s", $kd_lokasi);
+        $stmt_biaya_gudang->execute();
+        $result_biaya_gudang = $stmt_biaya_gudang->get_result();
+        $biaya_gudang_data = $result_biaya_gudang->fetch_assoc();
+        $total_biaya_gudang_tahun = floatval($biaya_gudang_data['TOTAL_BIAYA_GUDANG_TAHUN'] ?? 0);
         
-        if ($avg_harga_beli <= 0) {
-            $query_harga = "SELECT AVG(pb.HARGA_PESAN_BARANG_DUS) as AVG_HARGA
-                           FROM PESAN_BARANG pb
-                           WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.HARGA_PESAN_BARANG_DUS > 0";
-            $stmt_harga = $conn->prepare($query_harga);
-            $stmt_harga->bind_param("ss", $kd_barang, $kd_lokasi);
-            $stmt_harga->execute();
-            $result_harga = $stmt_harga->get_result();
-            if ($result_harga->num_rows > 0) {
-                $harga_data = $result_harga->fetch_assoc();
-                $avg_harga_dus = floatval($harga_data['AVG_HARGA'] ?? 0);
-                if ($avg_harga_dus > 0 && $satuan_perdus > 0) {
-                    $avg_harga_beli = $avg_harga_dus / $satuan_perdus;
-                }
-            }
+        // b. Rata-rata stok dus di gudang 1 tahun
+        $query_avg_stok_dus = "SELECT AVG(sh.JUMLAH_AKHIR) as AVG_STOK_DUS
+                              FROM STOCK_HISTORY sh
+                              WHERE sh.KD_LOKASI = ?
+                              AND sh.SATUAN = 'DUS'
+                              AND sh.WAKTU_CHANGE >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+                              AND sh.JUMLAH_AKHIR >= 0";
+        $stmt_avg_stok = $conn->prepare($query_avg_stok_dus);
+        $stmt_avg_stok->bind_param("s", $kd_lokasi);
+        $stmt_avg_stok->execute();
+        $result_avg_stok = $stmt_avg_stok->get_result();
+        $avg_stok_data = $result_avg_stok->fetch_assoc();
+        $avg_stok_dus = floatval($avg_stok_data['AVG_STOK_DUS'] ?? 0);
+        
+        // c. H per dus per tahun = Total biaya gudang ÷ Rata-rata stok dus
+        // d. H per dus per hari = H per tahun ÷ 365
+        if ($avg_stok_dus > 0 && $total_biaya_gudang_tahun > 0) {
+            $holding_cost_per_dus_per_tahun = $total_biaya_gudang_tahun / $avg_stok_dus;
+            $holding_cost = $holding_cost_per_dus_per_tahun / 365;
+        } else {
+            $holding_cost = 385;
         }
-        
-        $holding_cost_per_tahun = $avg_harga_beli > 0 ? ($avg_harga_beli * 0.25) : 0;
-        $holding_cost = $holding_cost_per_tahun > 0 ? ($holding_cost_per_tahun / 365) : 385;
         
         // 4. Lead Time
         $query_lead_time = "SELECT AVG(DATEDIFF(pb.WAKTU_SELESAI, pb.WAKTU_PESAN)) as AVG_LEAD_TIME
@@ -517,8 +503,8 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
             }
         }
         
-        // 7. Hitung Kuantitas POQ (Q*) dalam DUS
-        // Rumus: Q* = (D × T*) + (D × LeadTime) - Stok_Sekarang_dus
+        // 7. Hitung Kuantitas POQ (Q*) dalam dus
+        // Q* = (D × T*) + (D × LeadTime) - Stok_Sekarang_dus
         $kuantitas_poq = ($demand_rate * $interval_hari) + ($demand_rate * $lead_time) - $stock_sekarang;
         
         // Jika hasil negatif → 0 (tidak perlu pesan)
@@ -529,8 +515,8 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         // Dibulatkan ke atas (CEIL) ke dus utuh
         $kuantitas_poq = ceil($kuantitas_poq);
         
-        if ($interval_hari <= 0 || $kuantitas_poq <= 0) {
-            throw new Exception('Gagal menghitung interval atau kuantitas POQ');
+        if ($interval_hari <= 0) {
+            throw new Exception('Gagal menghitung interval POQ');
         }
         
         // Cek apakah interval sudah ada
@@ -809,14 +795,14 @@ if ($stmt_stock === false) {
     $message_type = 'danger';
     $result_stock = null;
 } else {
-$stmt_stock->bind_param("ss", $kd_lokasi, $kd_lokasi);
+    $stmt_stock->bind_param("ss", $kd_lokasi, $kd_lokasi);
     if (!$stmt_stock->execute()) {
         error_log("Execute Error: " . $stmt_stock->error);
         $message = 'Error menjalankan query: ' . htmlspecialchars($stmt_stock->error);
         $message_type = 'danger';
         $result_stock = null;
     } else {
-$result_stock = $stmt_stock->get_result();
+        $result_stock = $stmt_stock->get_result();
     }
 }
 
@@ -930,8 +916,8 @@ $active_page = 'stock';
                                             <button class="btn-view btn-sm" onclick="lihatRiwayatPembelian('<?php echo htmlspecialchars($row['KD_BARANG']); ?>')">Lihat Riwayat Pembelian</button>
                                             <button class="btn-view btn-sm" onclick="lihatExpired('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Lihat Expired</button>
                                             <?php if ($row['STATUS_BARANG'] == 'AKTIF'): ?>
-                                            <button class="btn-view btn-sm" onclick="hitungPOQ('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Hitung POQ</button>
-                                            <button class="btn-view btn-sm" onclick="pesanManual('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Pesan Manual</button>
+                                                <button class="btn-view btn-sm" onclick="hitungPOQ('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Hitung POQ</button>
+                                                <button class="btn-view btn-sm" onclick="pesanManual('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Pesan Manual</button>
                                             <?php endif; ?>
                                         </div>
                                     </td>
