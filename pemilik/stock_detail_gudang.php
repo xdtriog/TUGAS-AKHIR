@@ -231,17 +231,18 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $biaya_gudang_data = $result_biaya_gudang->fetch_assoc();
             $total_biaya_gudang_tahun = floatval($biaya_gudang_data['TOTAL_BIAYA_GUDANG_TAHUN'] ?? 0);
             
-            // b. Hitung rata-rata jumlah dus yang tersimpan di gudang selama 1 tahun
-            // Ambil stok akhir setiap hari dari STOCK_HISTORY (untuk gudang, SATUAN = 'DUS')
+            // b. Hitung rata-rata jumlah dus yang tersimpan di gudang selama 1 tahun UNTUK BARANG INI
+            // Ambil stok akhir setiap hari dari STOCK_HISTORY (untuk gudang, SATUAN = 'DUS', per barang)
             $query_avg_stok_dus = "SELECT 
                 AVG(sh.JUMLAH_AKHIR) as AVG_STOK_DUS
             FROM STOCK_HISTORY sh
-            WHERE sh.KD_LOKASI = ?
+            WHERE sh.KD_BARANG = ?
+            AND sh.KD_LOKASI = ?
             AND sh.SATUAN = 'DUS'
             AND sh.WAKTU_CHANGE >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
             AND sh.JUMLAH_AKHIR >= 0";
             $stmt_avg_stok = $conn->prepare($query_avg_stok_dus);
-            $stmt_avg_stok->bind_param("s", $kd_lokasi_ajax);
+            $stmt_avg_stok->bind_param("ss", $kd_barang_ajax, $kd_lokasi_ajax);
             $stmt_avg_stok->execute();
             $result_avg_stok = $stmt_avg_stok->get_result();
             $avg_stok_data = $result_avg_stok->fetch_assoc();
@@ -455,15 +456,16 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $biaya_gudang_data = $result_biaya_gudang->fetch_assoc();
         $total_biaya_gudang_tahun = floatval($biaya_gudang_data['TOTAL_BIAYA_GUDANG_TAHUN'] ?? 0);
         
-        // b. Rata-rata stok dus di gudang 1 tahun
+        // b. Rata-rata stok dus di gudang 1 tahun UNTUK BARANG INI
         $query_avg_stok_dus = "SELECT AVG(sh.JUMLAH_AKHIR) as AVG_STOK_DUS
                               FROM STOCK_HISTORY sh
-                              WHERE sh.KD_LOKASI = ?
+                              WHERE sh.KD_BARANG = ?
+                              AND sh.KD_LOKASI = ?
                               AND sh.SATUAN = 'DUS'
                               AND sh.WAKTU_CHANGE >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
                               AND sh.JUMLAH_AKHIR >= 0";
         $stmt_avg_stok = $conn->prepare($query_avg_stok_dus);
-        $stmt_avg_stok->bind_param("s", $kd_lokasi);
+        $stmt_avg_stok->bind_param("ss", $kd_barang, $kd_lokasi);
         $stmt_avg_stok->execute();
         $result_avg_stok = $stmt_avg_stok->get_result();
         $avg_stok_data = $result_avg_stok->fetch_assoc();
@@ -1049,19 +1051,19 @@ $active_page = 'stock';
                     <h6 class="mb-3">Data Perhitungan POQ (Rolling 1 Tahun)</h6>
                     <div class="row mb-3">
                         <div class="col-md-6 mb-2">
-                            <label class="form-label fw-bold">Permintaan (pieces/hari)</label>
+                            <label class="form-label fw-bold">Demand Rate (dus/hari)</label>
                             <input type="text" class="form-control form-control-sm" id="poq_permintaan" readonly style="background-color: #e9ecef;">
                         </div>
                         <div class="col-md-6 mb-2">
-                            <label class="form-label fw-bold">Total Penjualan 1 Tahun (pieces)</label>
+                            <label class="form-label fw-bold">Total Penjualan 1 Tahun (dus)</label>
                             <input type="text" class="form-control form-control-sm" id="poq_total_pieces" readonly style="background-color: #e9ecef;">
                         </div>
                         <div class="col-md-6 mb-2">
-                            <label class="form-label fw-bold">Biaya Administrasi Pemesanan</label>
+                            <label class="form-label fw-bold">Setup Cost (Biaya Administrasi Pemesanan)</label>
                             <input type="text" class="form-control form-control-sm" id="poq_biaya_administrasi" readonly style="background-color: #e9ecef;">
                         </div>
                         <div class="col-md-6 mb-2">
-                            <label class="form-label fw-bold">Biaya Holding (per pieces/hari)</label>
+                            <label class="form-label fw-bold">Holding Cost (Rp/dus/hari)</label>
                             <input type="text" class="form-control form-control-sm" id="poq_biaya_holding" readonly style="background-color: #e9ecef;">
                         </div>
                         <div class="col-md-6 mb-2">
@@ -1456,10 +1458,14 @@ $active_page = 'stock';
                         $('#poq_status_barang').val(response.status_barang || '');
                         
                         // Set data perhitungan (read-only)
-                        $('#poq_permintaan').val(response.demand_rate ? response.demand_rate.toLocaleString('id-ID') + ' pieces/hari' : '0');
-                        $('#poq_total_pieces').val(response.total_pieces_year ? response.total_pieces_year.toLocaleString('id-ID') + ' pieces' : '0');
+                        // Demand rate sudah dalam DUS per hari
+                        var demandRateDus = response.demand_rate || 0;
+                        $('#poq_permintaan').val(demandRateDus.toLocaleString('id-ID', {minimumFractionDigits: 4, maximumFractionDigits: 4}) + ' dus/hari');
+                        // Total penjualan dalam DUS (bukan pieces)
+                        var totalDusYear = response.total_dus_year || 0;
+                        $('#poq_total_pieces').val(totalDusYear.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' dus');
                         $('#poq_biaya_administrasi').val('Rp. ' + (response.setup_cost ? parseFloat(response.setup_cost).toLocaleString('id-ID') : '0'));
-                        $('#poq_biaya_holding').val('Rp. ' + (response.holding_cost ? parseFloat(response.holding_cost).toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0'));
+                        $('#poq_biaya_holding').val('Rp. ' + (response.holding_cost ? parseFloat(response.holding_cost).toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '/dus/hari' : '0'));
                         $('#poq_lead_time').val((response.lead_time || 0) + ' hari');
                         $('#poq_stock_sekarang').val((response.stock_sekarang || 0).toLocaleString('id-ID') + ' dus');
                         
