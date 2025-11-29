@@ -30,6 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
         mb.SATUAN_PERDUS,
         mb.AVG_HARGA_BELI_PIECES,
         mb.HARGA_JUAL_BARANG_PIECES,
+        mb.GAMBAR_BARANG,
         mb.STATUS
     FROM MASTER_BARANG mb
     WHERE mb.KD_BARANG = ?";
@@ -56,6 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
             'satuan_perdus' => $barang_data['SATUAN_PERDUS'],
             'avg_harga_beli' => $barang_data['AVG_HARGA_BELI_PIECES'] ?? 0,
             'harga_jual' => $barang_data['HARGA_JUAL_BARANG_PIECES'] ?? 0,
+            'gambar_barang' => $barang_data['GAMBAR_BARANG'] ?? '',
             'status' => $barang_data['STATUS']
         ]
     ]);
@@ -92,53 +94,109 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 $message_type = 'danger';
             } else {
                 $status = 'AKTIF'; // Status langsung AKTIF
-            
-            // Set NULL jika kosong
-            $kd_merek = !empty($kd_merek) ? $kd_merek : null;
-            $kd_kategori = !empty($kd_kategori) ? $kd_kategori : null;
-            
-                // Insert data
-                $insert_query = "INSERT INTO MASTER_BARANG (KD_BARANG, KD_MEREK_BARANG, KD_KATEGORI_BARANG, NAMA_BARANG, BERAT, SATUAN_PERDUS, STATUS) VALUES (?, ?, ?, ?, ?, ?, ?)";
-                $insert_stmt = $conn->prepare($insert_query);
-                $insert_stmt->bind_param("ssssiis", $kd_barang, $kd_merek, $kd_kategori, $nama_barang, $berat, $satuan_perdus, $status);
                 
-                if ($insert_stmt->execute()) {
-                    // Setelah barang berhasil ditambahkan, tambahkan ke tabel STOCK untuk semua lokasi aktif
-                    $user_id = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : null;
+                // Set NULL jika kosong
+                $kd_merek = !empty($kd_merek) ? $kd_merek : null;
+                $kd_kategori = !empty($kd_kategori) ? $kd_kategori : null;
+                
+                // Handle file upload
+                $gambar_barang = null;
+                if (isset($_FILES['gambar_barang']) && $_FILES['gambar_barang']['error'] == UPLOAD_ERR_OK) {
+                    // Gunakan path absolut untuk lebih aman
+                    $base_dir = dirname(__DIR__);
+                    $upload_dir = $base_dir . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'images' . DIRECTORY_SEPARATOR . 'barang' . DIRECTORY_SEPARATOR;
                     
-                    // Ambil semua lokasi aktif
-                    $query_lokasi = "SELECT KD_LOKASI, SATUAN FROM MASTER_LOKASI WHERE STATUS = 'AKTIF'";
-                    $result_lokasi = $conn->query($query_lokasi);
-                    
-                    if ($result_lokasi && $result_lokasi->num_rows > 0) {
-                        // Insert stock untuk setiap lokasi dengan nilai awal 0
-                        $insert_stock_query = "INSERT INTO STOCK (KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_BARANG, SATUAN) VALUES (?, ?, ?, 0, ?)";
-                        $insert_stock_stmt = $conn->prepare($insert_stock_query);
-                        
-                        while ($lokasi = $result_lokasi->fetch_assoc()) {
-                            $kd_lokasi = $lokasi['KD_LOKASI'];
-                            $satuan_lokasi = $lokasi['SATUAN']; // PIECES atau DUS sesuai lokasi
-                            
-                            $insert_stock_stmt->bind_param("ssss", $kd_barang, $kd_lokasi, $user_id, $satuan_lokasi);
-                            if (!$insert_stock_stmt->execute()) {
-                                // Log error jika ada, tapi tetap lanjutkan untuk lokasi lain
-                                error_log("Gagal insert stock untuk lokasi: " . $kd_lokasi);
-                            }
+                    // Pastikan folder upload ada, jika tidak buat folder
+                    if (!file_exists($upload_dir)) {
+                        if (!file_exists($base_dir . DIRECTORY_SEPARATOR . 'assets')) {
+                            mkdir($base_dir . DIRECTORY_SEPARATOR . 'assets', 0755, true);
                         }
-                        
-                        $insert_stock_stmt->close();
+                        if (!file_exists($base_dir . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'images')) {
+                            mkdir($base_dir . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'images', 0755, true);
+                        }
+                        if (!file_exists($upload_dir)) {
+                            mkdir($upload_dir, 0755, true);
+                        }
                     }
                     
-                    $message = 'Barang berhasil ditambahkan dengan kode: ' . $kd_barang;
-                    $message_type = 'success';
-                    // Redirect untuk mencegah resubmission
-                    header("Location: master_barang.php?success=1&kd_barang=" . urlencode($kd_barang));
-                    exit();
-                } else {
-                    $message = 'Gagal menambahkan barang!';
-                    $message_type = 'danger';
+                    $allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+                    $max_size = 5 * 1024 * 1024; // 5MB
+                    
+                    $file = $_FILES['gambar_barang'];
+                    $file_type = $file['type'];
+                    $file_size = $file['size'];
+                    $file_tmp = $file['tmp_name'];
+                    $file_ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                    
+                    // Validasi tipe file
+                    if (!in_array($file_type, $allowed_types)) {
+                        $message = 'Tipe file tidak diizinkan! Hanya JPG, PNG, GIF, dan WEBP yang diizinkan.';
+                        $message_type = 'danger';
+                    } elseif ($file_size > $max_size) {
+                        $message = 'Ukuran file terlalu besar! Maksimal 5MB.';
+                        $message_type = 'danger';
+                    } else {
+                        // Generate nama file unik
+                        $new_filename = $kd_barang . '_' . time() . '.' . $file_ext;
+                        $upload_path = $upload_dir . $new_filename;
+                        
+                        if (move_uploaded_file($file_tmp, $upload_path)) {
+                            $gambar_barang = 'assets/images/barang/' . $new_filename;
+                        } else {
+                            $error_msg = 'Gagal mengupload gambar!';
+                            if (!is_writable($upload_dir)) {
+                                $error_msg .= ' Folder upload tidak dapat ditulis.';
+                            }
+                            $message = $error_msg;
+                            $message_type = 'danger';
+                        }
+                    }
                 }
-                $insert_stmt->close();
+                
+                if ($message_type != 'danger') {
+                    // Insert data
+                    $insert_query = "INSERT INTO MASTER_BARANG (KD_BARANG, KD_MEREK_BARANG, KD_KATEGORI_BARANG, NAMA_BARANG, BERAT, SATUAN_PERDUS, GAMBAR_BARANG, STATUS) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                    $insert_stmt = $conn->prepare($insert_query);
+                    $insert_stmt->bind_param("ssssiiss", $kd_barang, $kd_merek, $kd_kategori, $nama_barang, $berat, $satuan_perdus, $gambar_barang, $status);
+                    
+                    if ($insert_stmt->execute()) {
+                        // Setelah barang berhasil ditambahkan, tambahkan ke tabel STOCK untuk semua lokasi aktif
+                        $user_id = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : null;
+                        
+                        // Ambil semua lokasi aktif
+                        $query_lokasi = "SELECT KD_LOKASI, SATUAN FROM MASTER_LOKASI WHERE STATUS = 'AKTIF'";
+                        $result_lokasi = $conn->query($query_lokasi);
+                        
+                        if ($result_lokasi && $result_lokasi->num_rows > 0) {
+                            // Insert stock untuk setiap lokasi dengan nilai awal 0
+                            $insert_stock_query = "INSERT INTO STOCK (KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_BARANG, SATUAN) VALUES (?, ?, ?, 0, ?)";
+                            $insert_stock_stmt = $conn->prepare($insert_stock_query);
+                            
+                            while ($lokasi = $result_lokasi->fetch_assoc()) {
+                                $kd_lokasi = $lokasi['KD_LOKASI'];
+                                $satuan_lokasi = $lokasi['SATUAN']; // PIECES atau DUS sesuai lokasi
+                                
+                                $insert_stock_stmt->bind_param("ssss", $kd_barang, $kd_lokasi, $user_id, $satuan_lokasi);
+                                if (!$insert_stock_stmt->execute()) {
+                                    // Log error jika ada, tapi tetap lanjutkan untuk lokasi lain
+                                    error_log("Gagal insert stock untuk lokasi: " . $kd_lokasi);
+                                }
+                            }
+                            
+                            $insert_stock_stmt->close();
+                        }
+                        
+                        $message = 'Barang berhasil ditambahkan dengan kode: ' . $kd_barang;
+                        $message_type = 'success';
+                        // Redirect untuk mencegah resubmission
+                        header("Location: master_barang.php?success=1&kd_barang=" . urlencode($kd_barang));
+                        exit();
+                    } else {
+                        $message = 'Gagal menambahkan barang!';
+                        $message_type = 'danger';
+                    }
+                    $insert_stmt->close();
+                }
             }
         } else {
             $message = 'Nama barang dan satuan per dus harus diisi!';
@@ -153,28 +211,106 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         $satuan_perdus = intval($_POST['satuan_perdus']);
         $harga_jual = floatval($_POST['harga_jual']);
         $status = trim($_POST['status']);
+        $hapus_gambar = isset($_POST['hapus_gambar']) && $_POST['hapus_gambar'] == '1';
         
         if (!empty($kd_barang) && !empty($nama_barang) && $satuan_perdus > 0 && !empty($status)) {
             // Set NULL jika kosong
             $kd_merek = !empty($kd_merek) ? $kd_merek : null;
             $kd_kategori = !empty($kd_kategori) ? $kd_kategori : null;
             
-            // Update data (AVG_HARGA_BELI_PIECES tidak diupdate karena readonly)
-            $update_query = "UPDATE MASTER_BARANG SET KD_MEREK_BARANG = ?, KD_KATEGORI_BARANG = ?, NAMA_BARANG = ?, BERAT = ?, SATUAN_PERDUS = ?, HARGA_JUAL_BARANG_PIECES = ?, STATUS = ? WHERE KD_BARANG = ?";
-            $update_stmt = $conn->prepare($update_query);
-            $update_stmt->bind_param("sssiidss", $kd_merek, $kd_kategori, $nama_barang, $berat, $satuan_perdus, $harga_jual, $status, $kd_barang);
+            // Get gambar lama
+            $query_gambar_lama = "SELECT GAMBAR_BARANG FROM MASTER_BARANG WHERE KD_BARANG = ?";
+            $stmt_gambar_lama = $conn->prepare($query_gambar_lama);
+            $stmt_gambar_lama->bind_param("s", $kd_barang);
+            $stmt_gambar_lama->execute();
+            $result_gambar_lama = $stmt_gambar_lama->get_result();
+            $gambar_lama = $result_gambar_lama->num_rows > 0 ? $result_gambar_lama->fetch_assoc()['GAMBAR_BARANG'] : null;
             
-            if ($update_stmt->execute()) {
-                $message = 'Barang berhasil diperbarui';
-                $message_type = 'success';
-                // Redirect untuk mencegah resubmission
-                header("Location: master_barang.php?success=2&kd_barang=" . urlencode($kd_barang));
-                exit();
-            } else {
-                $message = 'Gagal memperbarui barang!';
-                $message_type = 'danger';
+            // Handle file upload atau hapus gambar
+            $gambar_barang = $gambar_lama; // Default: keep existing image
+            
+            if ($hapus_gambar) {
+                // Hapus file lama jika ada
+                if ($gambar_lama && file_exists('../' . $gambar_lama)) {
+                    unlink('../' . $gambar_lama);
+                }
+                $gambar_barang = null;
+            } elseif (isset($_FILES['gambar_barang']) && $_FILES['gambar_barang']['error'] == UPLOAD_ERR_OK) {
+                // Upload gambar baru
+                // Gunakan path absolut untuk lebih aman
+                $base_dir = dirname(__DIR__);
+                $upload_dir = $base_dir . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'images' . DIRECTORY_SEPARATOR . 'barang' . DIRECTORY_SEPARATOR;
+                
+                // Pastikan folder upload ada, jika tidak buat folder
+                if (!file_exists($upload_dir)) {
+                    if (!file_exists($base_dir . DIRECTORY_SEPARATOR . 'assets')) {
+                        mkdir($base_dir . DIRECTORY_SEPARATOR . 'assets', 0755, true);
+                    }
+                    if (!file_exists($base_dir . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'images')) {
+                        mkdir($base_dir . DIRECTORY_SEPARATOR . 'assets' . DIRECTORY_SEPARATOR . 'images', 0755, true);
+                    }
+                    if (!file_exists($upload_dir)) {
+                        mkdir($upload_dir, 0755, true);
+                    }
+                }
+                
+                $allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+                $max_size = 5 * 1024 * 1024; // 5MB
+                
+                $file = $_FILES['gambar_barang'];
+                $file_type = $file['type'];
+                $file_size = $file['size'];
+                $file_tmp = $file['tmp_name'];
+                $file_ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                
+                // Validasi tipe file
+                if (!in_array($file_type, $allowed_types)) {
+                    $message = 'Tipe file tidak diizinkan! Hanya JPG, PNG, GIF, dan WEBP yang diizinkan.';
+                    $message_type = 'danger';
+                } elseif ($file_size > $max_size) {
+                    $message = 'Ukuran file terlalu besar! Maksimal 5MB.';
+                    $message_type = 'danger';
+                } else {
+                    // Hapus file lama jika ada
+                    if ($gambar_lama && file_exists('../' . $gambar_lama)) {
+                        unlink('../' . $gambar_lama);
+                    }
+                    
+                    // Generate nama file unik
+                    $new_filename = $kd_barang . '_' . time() . '.' . $file_ext;
+                    $upload_path = $upload_dir . $new_filename;
+                    
+                    if (move_uploaded_file($file_tmp, $upload_path)) {
+                        $gambar_barang = 'assets/images/barang/' . $new_filename;
+                    } else {
+                        $error_msg = 'Gagal mengupload gambar!';
+                        if (!is_writable($upload_dir)) {
+                            $error_msg .= ' Folder upload tidak dapat ditulis.';
+                        }
+                        $message = $error_msg;
+                        $message_type = 'danger';
+                    }
+                }
             }
-            $update_stmt->close();
+            
+            if ($message_type != 'danger') {
+                // Update data (AVG_HARGA_BELI_PIECES tidak diupdate karena readonly)
+                $update_query = "UPDATE MASTER_BARANG SET KD_MEREK_BARANG = ?, KD_KATEGORI_BARANG = ?, NAMA_BARANG = ?, BERAT = ?, SATUAN_PERDUS = ?, HARGA_JUAL_BARANG_PIECES = ?, GAMBAR_BARANG = ?, STATUS = ? WHERE KD_BARANG = ?";
+                $update_stmt = $conn->prepare($update_query);
+                $update_stmt->bind_param("sssiidsss", $kd_merek, $kd_kategori, $nama_barang, $berat, $satuan_perdus, $harga_jual, $gambar_barang, $status, $kd_barang);
+                
+                if ($update_stmt->execute()) {
+                    $message = 'Barang berhasil diperbarui';
+                    $message_type = 'success';
+                    // Redirect untuk mencegah resubmission
+                    header("Location: master_barang.php?success=2&kd_barang=" . urlencode($kd_barang));
+                    exit();
+                } else {
+                    $message = 'Gagal memperbarui barang!';
+                    $message_type = 'danger';
+                }
+                $update_stmt->close();
+            }
         } else {
             $message = 'Semua field wajib harus diisi!';
             $message_type = 'danger';
@@ -203,6 +339,7 @@ $query_barang = "SELECT
                     mb.SATUAN_PERDUS,
                     mb.AVG_HARGA_BELI_PIECES,
                     mb.HARGA_JUAL_BARANG_PIECES,
+                    mb.GAMBAR_BARANG,
                     mb.LAST_UPDATED,
                     mb.STATUS
                  FROM MASTER_BARANG mb
@@ -296,7 +433,12 @@ $active_page = 'master_barang';
                                         </span>
                                     </td>
                                     <td>
-                                        <button class="btn-view" onclick="openEditModal('<?php echo htmlspecialchars($row['KD_BARANG'], ENT_QUOTES); ?>')">Edit</button>
+                                        <div class="d-flex flex-column gap-1">
+                                            <?php if (!empty($row['GAMBAR_BARANG']) && file_exists('../' . $row['GAMBAR_BARANG'])): ?>
+                                                <button class="btn-view btn-sm" onclick="lihatGambar('<?php echo htmlspecialchars($row['GAMBAR_BARANG'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['NAMA_BARANG'], ENT_QUOTES); ?>')">Lihat Gambar</button>
+                                            <?php endif; ?>
+                                            <button class="btn-view btn-sm" onclick="openEditModal('<?php echo htmlspecialchars($row['KD_BARANG'], ENT_QUOTES); ?>')">Edit</button>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endwhile; ?>
@@ -315,7 +457,7 @@ $active_page = 'master_barang';
                     <h5 class="modal-title" id="modalTambahBarangLabel">Tambahkan Barang</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <form id="formTambahBarang" method="POST" action="">
+                <form id="formTambahBarang" method="POST" action="" enctype="multipart/form-data">
                     <div class="modal-body">
                         <input type="hidden" name="action" value="tambah_barang">
                         
@@ -370,12 +512,40 @@ $active_page = 'master_barang';
                             <input type="number" class="form-control" id="satuan_perdus" name="satuan_perdus" placeholder="Masukkan satuan per dus" min="1" required>
                             <small class="text-muted">Jumlah satuan dalam 1 dus (minimal 1).</small>
                         </div>
+                        
+                        <div class="mb-3">
+                            <label for="gambar_barang" class="form-label">Gambar Barang</label>
+                            <input type="file" class="form-control" id="gambar_barang" name="gambar_barang" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp">
+                            <small class="text-muted">Format: JPG, PNG, GIF, WEBP. Maksimal 5MB.</small>
+                            <div id="previewTambah" class="mt-2" style="display: none;">
+                                <img id="previewImgTambah" src="" alt="Preview" style="max-width: 200px; max-height: 200px; border-radius: 4px; border: 1px solid #dee2e6;">
+                            </div>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
                         <button type="submit" class="btn-primary-custom" id="btnSimpanTambah">Simpan</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Lihat Gambar -->
+    <div class="modal fade" id="modalLihatGambar" tabindex="-1" aria-labelledby="modalLihatGambarLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    <h5 class="modal-title" id="modalLihatGambarLabel">Gambar Barang</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img id="gambarBarangDisplay" src="" alt="Gambar Barang" style="max-width: 100%; max-height: 70vh; border-radius: 8px;">
+                    <p class="mt-3 mb-0 text-muted" id="namaBarangDisplay"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+                </div>
             </div>
         </div>
     </div>
@@ -388,10 +558,11 @@ $active_page = 'master_barang';
                     <h5 class="modal-title" id="modalEditBarangLabel">Edit Barang</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <form id="formEditBarang" method="POST" action="">
+                <form id="formEditBarang" method="POST" action="" enctype="multipart/form-data">
                     <div class="modal-body">
                         <input type="hidden" name="action" value="edit_barang">
                         <input type="hidden" name="kd_barang" id="edit_kd_barang">
+                        <input type="hidden" name="hapus_gambar" id="edit_hapus_gambar" value="0">
                         
                         <div class="row">
                             <div class="col-md-6">
@@ -481,8 +652,21 @@ $active_page = 'master_barang';
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label for="edit_harga_jual" class="form-label">Harga Jual</label>
-                                    <input type="number" class="form-control form-control-sm" id="edit_harga_jual" name="harga_jual" placeholder="0" min="0" step="0.01" value="0">
+                                    <input type="text" class="form-control form-control-sm" id="edit_harga_jual" placeholder="Rp 0">
                                 </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="edit_gambar_barang" class="form-label">Gambar Barang</label>
+                            <input type="file" class="form-control form-control-sm" id="edit_gambar_barang" name="gambar_barang" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp">
+                            <small class="text-muted">Format: JPG, PNG, GIF, WEBP. Maksimal 5MB. Kosongkan jika tidak ingin mengubah gambar.</small>
+                            <div id="previewEdit" class="mt-2">
+                                <img id="previewImgEdit" src="" alt="Preview" style="max-width: 200px; max-height: 200px; border-radius: 4px; border: 1px solid #dee2e6; display: none;">
+                                <div id="noImageEdit" class="text-muted" style="display: none;">Tidak ada gambar</div>
+                            </div>
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-sm btn-danger" id="btnHapusGambar" style="display: none;" onclick="hapusGambarEdit()">Hapus Gambar</button>
                             </div>
                         </div>
                     </div>
@@ -602,11 +786,27 @@ $active_page = 'master_barang';
             $('#btnSimpanTambah').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan...');
         });
         
+        // Preview gambar saat pilih file - Tambah
+        $('#gambar_barang').on('change', function(e) {
+            var file = e.target.files[0];
+            if (file) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    $('#previewImgTambah').attr('src', e.target.result);
+                    $('#previewTambah').show();
+                };
+                reader.readAsDataURL(file);
+            } else {
+                $('#previewTambah').hide();
+            }
+        });
+        
         // Reset flag saat modal ditutup
         $('#modalTambahBarang').on('hidden.bs.modal', function() {
             isSubmitting = false;
             $('#btnSimpanTambah').prop('disabled', false).html('Simpan');
             $('#formTambahBarang')[0].reset();
+            $('#previewTambah').hide();
         });
         
         // Form validation dan prevent multiple submission - Edit
@@ -658,6 +858,16 @@ $active_page = 'master_barang';
                 cancelButtonText: 'Batal'
             }).then((result) => {
                 if (result.isConfirmed) {
+                    // Hapus hidden input lama jika ada
+                    $('#edit_harga_jual_hidden').remove();
+                    
+                    // Unformat harga jual dan buat hidden input
+                    var hargaJualUnformatted = unformatRupiah($('#edit_harga_jual').val());
+                    $('#formEditBarang').append('<input type="hidden" name="harga_jual" id="edit_harga_jual_hidden" value="' + hargaJualUnformatted + '">');
+                    
+                    // Hapus name dari input yang terlihat
+                    $('#edit_harga_jual').removeAttr('name');
+                    
                     isSubmittingEdit = true;
                     $('#btnSimpanEdit').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan...');
                     $('#formEditBarang')[0].submit();
@@ -665,11 +875,105 @@ $active_page = 'master_barang';
             });
         });
         
+        // Preview gambar saat pilih file - Edit
+        $('#edit_gambar_barang').on('change', function(e) {
+            var file = e.target.files[0];
+            if (file) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    $('#previewImgEdit').attr('src', e.target.result).show();
+                    $('#noImageEdit').hide();
+                    $('#btnHapusGambar').show();
+                };
+                reader.readAsDataURL(file);
+                $('#edit_hapus_gambar').val('0'); // Reset hapus gambar jika upload baru
+            }
+        });
+        
+        function hapusGambarEdit() {
+            $('#previewImgEdit').hide();
+            $('#noImageEdit').show();
+            $('#edit_gambar_barang').val('');
+            $('#edit_hapus_gambar').val('1');
+            $('#btnHapusGambar').hide();
+        }
+        
         // Reset flag saat modal ditutup
         $('#modalEditBarang').on('hidden.bs.modal', function() {
             isSubmittingEdit = false;
             $('#btnSimpanEdit').prop('disabled', false).html('Simpan Perubahan');
+            $('#edit_hapus_gambar').val('0');
+            $('#edit_gambar_barang').val('');
+            // Hapus hidden input jika ada
+            $('#edit_harga_jual_hidden').remove();
+            // Kembalikan name attribute
+            $('#edit_harga_jual').attr('name', 'harga_jual');
         });
+        
+        // Format rupiah untuk input harga jual
+        function formatRupiah(angka) {
+            if (!angka && angka !== 0) return '';
+            
+            // Konversi ke string dan hapus semua karakter non-digit kecuali titik dan koma
+            var number_string = angka.toString().replace(/[^\d.,]/g, '');
+            
+            // Pisahkan bagian integer dan desimal
+            var parts = number_string.split(/[.,]/);
+            var integerPart = parts[0] || '0';
+            var decimalPart = parts[1] || '';
+            
+            // Format integer dengan titik sebagai pemisah ribuan
+            var formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            
+            // Gabungkan dengan desimal jika ada
+            var result = formattedInteger;
+            if (decimalPart) {
+                result += ',' + decimalPart;
+            }
+            
+            return 'Rp ' + result;
+        }
+        
+        function unformatRupiah(rupiah) {
+            if (!rupiah) return 0;
+            // Hapus "Rp " dan spasi, ganti titik (ribuan) dengan kosong, ganti koma (desimal) dengan titik
+            var cleaned = rupiah.toString().replace(/Rp\s?/g, '').replace(/\./g, '').replace(',', '.');
+            return parseFloat(cleaned) || 0;
+        }
+        
+        // Event listener untuk format rupiah saat input
+        $(document).on('input', '#edit_harga_jual', function() {
+            var value = $(this).val();
+            
+            // Simpan posisi cursor
+            var cursorPosition = this.selectionStart;
+            var originalLength = value.length;
+            
+            // Unformat dan format ulang
+            var unformatted = unformatRupiah(value);
+            var formatted = formatRupiah(unformatted);
+            
+            $(this).val(formatted);
+            
+            // Atur ulang posisi cursor
+            var newLength = formatted.length;
+            var lengthDiff = newLength - originalLength;
+            var newCursorPosition = cursorPosition + lengthDiff;
+            
+            // Pastikan cursor tidak keluar dari batas
+            if (newCursorPosition < 0) newCursorPosition = 0;
+            if (newCursorPosition > newLength) newCursorPosition = newLength;
+            
+            this.setSelectionRange(newCursorPosition, newCursorPosition);
+        });
+        
+        // Function untuk melihat gambar barang
+        function lihatGambar(gambarPath, namaBarang) {
+            $('#gambarBarangDisplay').attr('src', '../' + gambarPath);
+            $('#namaBarangDisplay').text(namaBarang);
+            var modal = new bootstrap.Modal(document.getElementById('modalLihatGambar'));
+            modal.show();
+        }
         
         // Function untuk membuka modal edit barang
         function openEditModal(kdBarang) {
@@ -702,8 +1006,22 @@ $active_page = 'master_barang';
                             : 'Rp 0';
                         $('#edit_avg_harga_beli').val(avgHargaBeliFormatted);
                         
-                        $('#edit_harga_jual').val(data.harga_jual || 0);
+                        // Format Harga Jual dengan rupiah
+                        var hargaJualNum = parseFloat(data.harga_jual) || 0;
+                        $('#edit_harga_jual').val(formatRupiah(hargaJualNum));
                         $('#edit_status').val(data.status || 'AKTIF');
+                        
+                        // Handle gambar
+                        if (data.gambar_barang && data.gambar_barang.trim() !== '') {
+                            $('#previewImgEdit').attr('src', '../' + data.gambar_barang).show();
+                            $('#noImageEdit').hide();
+                            $('#btnHapusGambar').show();
+                        } else {
+                            $('#previewImgEdit').hide();
+                            $('#noImageEdit').show();
+                            $('#btnHapusGambar').hide();
+                        }
+                        $('#edit_hapus_gambar').val('0');
                         
                         // Buka modal menggunakan Bootstrap 5
                         var modalElement = document.getElementById('modalEditBarang');

@@ -18,7 +18,7 @@ function generateIdUser($conn, $role) {
         case 'OWNER':
             $prefix = 'OWNR';
             break;
-        case 'STAFF GUDANG':
+        case 'STAFF GUDANG':    
             $prefix = 'GDNG';
             break;
         case 'STAFF TOKO':
@@ -52,7 +52,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] == 'tambah_user') {
         $role = trim($_POST['role']);
         $kd_lokasi = !empty($_POST['kd_lokasi']) ? trim($_POST['kd_lokasi']) : null;
-        $kd_supplier = !empty($_POST['kd_supplier']) ? trim($_POST['kd_supplier']) : null;
         $nama = trim($_POST['nama']);
         $username = trim($_POST['username']);
         $password = trim($_POST['password']);
@@ -86,9 +85,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                         $check_stmt->close();
                         
                         // Insert data
-                        $insert_query = "INSERT INTO USERS (ID_USERS, KD_LOKASI, KD_SUPPLIER, NAMA, USERNAME, PASSWORD, STATUS) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                        $insert_query = "INSERT INTO USERS (ID_USERS, KD_LOKASI, NAMA, USERNAME, PASSWORD, STATUS) VALUES (?, ?, ?, ?, ?, ?)";
                         $insert_stmt = $conn->prepare($insert_query);
-                        $insert_stmt->bind_param("sssssss", $id_user, $kd_lokasi, $kd_supplier, $nama, $username, $password, $status);
+                        $insert_stmt->bind_param("ssssss", $id_user, $kd_lokasi, $nama, $username, $password, $status);
                         
                         if ($insert_stmt->execute()) {
                             $message = 'User berhasil ditambahkan dengan ID: ' . $id_user;
@@ -111,7 +110,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
     } elseif ($_POST['action'] == 'edit_user') {
         $id_user = trim($_POST['id_user']);
         $kd_lokasi = !empty($_POST['kd_lokasi']) ? trim($_POST['kd_lokasi']) : null;
-        $kd_supplier = !empty($_POST['kd_supplier']) ? trim($_POST['kd_supplier']) : null;
         $nama = trim($_POST['nama']);
         $username = trim($_POST['username']);
         $password = trim($_POST['password']);
@@ -135,14 +133,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
                 // Update data
                 if (!empty($password)) {
                     // Update dengan password baru
-                    $update_query = "UPDATE USERS SET KD_LOKASI = ?, KD_SUPPLIER = ?, NAMA = ?, USERNAME = ?, PASSWORD = ?, STATUS = ? WHERE ID_USERS = ?";
+                    $update_query = "UPDATE USERS SET KD_LOKASI = ?, NAMA = ?, USERNAME = ?, PASSWORD = ?, STATUS = ? WHERE ID_USERS = ?";
                     $update_stmt = $conn->prepare($update_query);
-                    $update_stmt->bind_param("sssssss", $kd_lokasi, $kd_supplier, $nama, $username, $password, $status, $id_user);
+                    $update_stmt->bind_param("ssssss", $kd_lokasi, $nama, $username, $password, $status, $id_user);
                 } else {
                     // Update tanpa mengubah password
-                    $update_query = "UPDATE USERS SET KD_LOKASI = ?, KD_SUPPLIER = ?, NAMA = ?, USERNAME = ?, STATUS = ? WHERE ID_USERS = ?";
+                    $update_query = "UPDATE USERS SET KD_LOKASI = ?, NAMA = ?, USERNAME = ?, STATUS = ? WHERE ID_USERS = ?";
                     $update_stmt = $conn->prepare($update_query);
-                    $update_stmt->bind_param("ssssss", $kd_lokasi, $kd_supplier, $nama, $username, $status, $id_user);
+                    $update_stmt->bind_param("sssss", $kd_lokasi, $nama, $username, $status, $id_user);
                 }
                 
                 if ($update_stmt->execute()) {
@@ -176,18 +174,19 @@ if (isset($_GET['success']) && $_GET['success'] == '1') {
 // Query untuk mendapatkan data User dengan lokasi bekerja
 $query_user = "SELECT 
                     u.ID_USERS,
-                    COALESCE(ml.NAMA_LOKASI, ms.NAMA_SUPPLIER, '-') as LOKASI_BEKERJA,
+                    COALESCE(ml.NAMA_LOKASI, '-') as LOKASI_BEKERJA,
                     u.NAMA,
                     u.USERNAME,
                     u.PASSWORD,
                     u.STATUS,
-                    u.KD_LOKASI,
-                    u.KD_SUPPLIER
+                    u.KD_LOKASI
                  FROM USERS u
                  LEFT JOIN MASTER_LOKASI ml ON u.KD_LOKASI = ml.KD_LOKASI
-                 LEFT JOIN MASTER_SUPPLIER ms ON u.KD_SUPPLIER = ms.KD_SUPPLIER
                  ORDER BY u.ID_USERS ASC";
 $result_user = $conn->query($query_user);
+if ($result_user === false) {
+    die('Error query user: ' . $conn->error);
+}
 
 // Query untuk mendapatkan data Lokasi (untuk dropdown)
 $query_lokasi = "SELECT KD_LOKASI, NAMA_LOKASI, TYPE_LOKASI 
@@ -195,13 +194,9 @@ $query_lokasi = "SELECT KD_LOKASI, NAMA_LOKASI, TYPE_LOKASI
                  WHERE STATUS = 'AKTIF'
                  ORDER BY NAMA_LOKASI ASC";
 $result_lokasi = $conn->query($query_lokasi);
-
-// Query untuk mendapatkan data Supplier (untuk dropdown)
-$query_supplier = "SELECT KD_SUPPLIER, NAMA_SUPPLIER 
-                   FROM MASTER_SUPPLIER 
-                   WHERE STATUS = 'AKTIF'
-                   ORDER BY NAMA_SUPPLIER ASC";
-$result_supplier = $conn->query($query_supplier);
+if ($result_lokasi === false) {
+    die('Error query lokasi: ' . $conn->error);
+}
 
 // Set active page untuk sidebar
 $active_page = 'master_user';
@@ -270,7 +265,7 @@ $active_page = 'master_user';
                                         <?php endif; ?>
                                     </td>
                                     <td>
-                                        <button class="btn-view" onclick="editUser('<?php echo htmlspecialchars($row['ID_USERS']); ?>', '<?php echo htmlspecialchars($row['KD_LOKASI'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['KD_SUPPLIER'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['NAMA'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['USERNAME'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['PASSWORD'], ENT_QUOTES); ?>', '<?php echo $row['STATUS']; ?>')">Edit</button>
+                                        <button class="btn-view" onclick="editUser('<?php echo htmlspecialchars($row['ID_USERS']); ?>', '<?php echo htmlspecialchars($row['KD_LOKASI'] ?? '', ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['NAMA'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['USERNAME'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['PASSWORD'], ENT_QUOTES); ?>', '<?php echo $row['STATUS']; ?>')">Edit</button>
                                     </td>
                                 </tr>
                             <?php endwhile; ?>
@@ -641,7 +636,7 @@ $active_page = 'master_user';
         // Flag untuk mencegah multiple submission edit
         var isSubmittingEdit = false;
         
-        function editUser(idUser, kdLokasi, kdSupplier, nama, username, password, status) {
+        function editUser(idUser, kdLokasi, nama, username, password, status) {
             // Set nilai form edit
             $('#edit_id_user').val(idUser);
             $('#edit_id_user_display').val(idUser);
