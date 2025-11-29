@@ -166,18 +166,19 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $stock_sekarang = intval($stock_data['JUMLAH_BARANG']);
             $satuan_perdus = intval($barang_data['SATUAN_PERDUS'] ?? 1);
             
-            // 1. Hitung DEMAND RATE (D) dalam DUS per hari dari penjualan setahun terakhir
+            // 1. Hitung DEMAND RATE (D) dalam DUS per hari dari penjualan SEMUA TOKO setahun terakhir
             // Konversi dari penjualan toko: JUMLAH_JUAL_BARANG (pieces) ÷ SATUAN_PERDUS = dus
             $query_demand = "SELECT 
                 COALESCE(SUM(dnj.JUMLAH_JUAL_BARANG), 0) as TOTAL_PIECES
             FROM DETAIL_NOTA_JUAL dnj
             INNER JOIN NOTA_JUAL nj ON dnj.ID_NOTA_JUAL = nj.ID_NOTA_JUAL
+            INNER JOIN MASTER_LOKASI ml ON nj.KD_LOKASI = ml.KD_LOKASI
             WHERE dnj.KD_BARANG = ? 
-            AND nj.KD_LOKASI != ?  -- Penjualan dari toko (bukan gudang)
+            AND ml.TYPE_LOKASI = 'toko'  -- Penjualan dari SEMUA TOKO
             AND nj.WAKTU_NOTA >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
             AND nj.WAKTU_NOTA <= CURDATE()";
             $stmt_demand = $conn->prepare($query_demand);
-            $stmt_demand->bind_param("ss", $kd_barang_ajax, $kd_lokasi_ajax);
+            $stmt_demand->bind_param("s", $kd_barang_ajax);
             $stmt_demand->execute();
             $result_demand = $stmt_demand->get_result();
             $demand_data = $result_demand->fetch_assoc();
@@ -187,7 +188,11 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $total_dus_terjual = $satuan_perdus > 0 ? ($total_pieces / $satuan_perdus) : 0;
             
             // Demand rate dalam DUS per hari (untuk 1 tahun = 365 hari)
-            $demand_rate = $total_dus_terjual > 0 ? ($total_dus_terjual / 365) : 0.01; // Minimum 0.01 dus/hari jika tidak ada data
+            // TIDAK ADA DEFAULT - harus dari data hitungan
+            if ($total_dus_terjual <= 0) {
+                throw new Exception('Tidak ada data penjualan untuk menghitung demand rate');
+            }
+            $demand_rate = $total_dus_terjual / 365;
             
             // 2. Hitung SETUP COST (S) - biaya tetap setiap kali pemesanan
             // Ambil rata-rata BIAYA_PENGIRIMAAN dari PESAN_BARANG (biaya admin + bongkar muat)
@@ -200,13 +205,12 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $stmt_setup->execute();
             $result_setup = $stmt_setup->get_result();
             $setup_data = $result_setup->fetch_assoc();
-            $avg_biaya_pengiriman = floatval($setup_data['AVG_BIAYA_PENGIRIMAAN'] ?? 0);
+            $setup_cost = floatval($setup_data['AVG_BIAYA_PENGIRIMAAN'] ?? 0);
             
-            // Jika belum ada data, gunakan default 300000
-            if ($avg_biaya_pengiriman <= 0) {
-                $avg_biaya_pengiriman = 300000;
+            // TIDAK ADA DEFAULT - harus dari data hitungan
+            if ($setup_cost <= 0) {
+                throw new Exception('Tidak ada data BIAYA_PENGIRIMAAN untuk menghitung setup cost');
             }
-            $setup_cost = $avg_biaya_pengiriman;
             
             // 3. Hitung HOLDING COST (H) - Rp per DUS per hari (CARA PALING AKURAT)
             // a. Hitung total biaya operasional gudang 1 tahun terakhir
@@ -245,13 +249,12 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             
             // c. H per dus per tahun = Total biaya gudang ÷ Rata-rata stok dus
             // d. H per dus per hari = H per tahun ÷ 365
-            if ($avg_stok_dus > 0 && $total_biaya_gudang_tahun > 0) {
-                $holding_cost_per_dus_per_tahun = $total_biaya_gudang_tahun / $avg_stok_dus;
-                $holding_cost = $holding_cost_per_dus_per_tahun / 365;
-            } else {
-                // Jika tidak ada data, gunakan default (misal 385 per dus per hari)
-                $holding_cost = 385;
+            // TIDAK ADA DEFAULT - harus dari data hitungan
+            if ($avg_stok_dus <= 0 || $total_biaya_gudang_tahun <= 0) {
+                throw new Exception('Tidak ada data biaya operasional gudang atau stok history untuk menghitung holding cost');
             }
+            $holding_cost_per_dus_per_tahun = $total_biaya_gudang_tahun / $avg_stok_dus;
+            $holding_cost = $holding_cost_per_dus_per_tahun / 365;
             
             // 4. Hitung LEAD TIME (rata-rata waktu pengiriman dari supplier)
             $query_lead_time = "SELECT 
@@ -269,7 +272,12 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $result_lead_time = $stmt_lead_time->get_result();
             $lead_time_data = $result_lead_time->fetch_assoc();
             $avg_lead_time = floatval($lead_time_data['AVG_LEAD_TIME'] ?? 0);
-            $lead_time = $avg_lead_time > 0 ? round($avg_lead_time) : 2; // Default 2 hari jika tidak ada data
+            
+            // TIDAK ADA DEFAULT - harus dari data hitungan
+            if ($avg_lead_time <= 0) {
+                throw new Exception('Tidak ada data lead time dari PESAN_BARANG yang sudah selesai');
+            }
+            $lead_time = round($avg_lead_time);
             
             // 5. Cek apakah interval POQ sudah ada
             $query_interval_poq = "SELECT INTERVAL_HARI
@@ -390,20 +398,27 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $stock_sekarang = intval($stock_data['JUMLAH_BARANG']);
         
         // Hitung ulang semua variabel POQ (sama seperti di get_poq_data)
-        // 1. Demand Rate (D) dalam DUS per hari
+        // 1. Demand Rate (D) dalam DUS per hari dari SEMUA TOKO
         $query_demand = "SELECT COALESCE(SUM(dnj.JUMLAH_JUAL_BARANG), 0) as TOTAL_PIECES
                         FROM DETAIL_NOTA_JUAL dnj
                         INNER JOIN NOTA_JUAL nj ON dnj.ID_NOTA_JUAL = nj.ID_NOTA_JUAL
-                        WHERE dnj.KD_BARANG = ? AND nj.KD_LOKASI != ?
+                        INNER JOIN MASTER_LOKASI ml ON nj.KD_LOKASI = ml.KD_LOKASI
+                        WHERE dnj.KD_BARANG = ? 
+                        AND ml.TYPE_LOKASI = 'toko'
                         AND nj.WAKTU_NOTA >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)";
         $stmt_demand = $conn->prepare($query_demand);
-        $stmt_demand->bind_param("ss", $kd_barang, $kd_lokasi);
+        $stmt_demand->bind_param("s", $kd_barang);
         $stmt_demand->execute();
         $result_demand = $stmt_demand->get_result();
         $demand_data = $result_demand->fetch_assoc();
         $total_pieces = intval($demand_data['TOTAL_PIECES'] ?? 0);
         $total_dus_terjual = $satuan_perdus > 0 ? ($total_pieces / $satuan_perdus) : 0;
-        $demand_rate = $total_dus_terjual > 0 ? ($total_dus_terjual / 365) : 0.01;
+        
+        // TIDAK ADA DEFAULT - harus dari data hitungan
+        if ($total_dus_terjual <= 0) {
+            throw new Exception('Tidak ada data penjualan untuk menghitung demand rate');
+        }
+        $demand_rate = $total_dus_terjual / 365;
         
         // 2. Setup Cost (S) - biaya tetap pemesanan
         $query_setup = "SELECT COALESCE(AVG(pb.BIAYA_PENGIRIMAAN), 0) as AVG_BIAYA
@@ -415,8 +430,10 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $result_setup = $stmt_setup->get_result();
         $setup_data = $result_setup->fetch_assoc();
         $setup_cost = floatval($setup_data['AVG_BIAYA'] ?? 0);
+        
+        // TIDAK ADA DEFAULT - harus dari data hitungan
         if ($setup_cost <= 0) {
-            $setup_cost = 300000;
+            throw new Exception('Tidak ada data BIAYA_PENGIRIMAAN untuk menghitung setup cost');
         }
         
         // 3. Holding Cost (H) - Rp per DUS per hari
@@ -454,12 +471,12 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         
         // c. H per dus per tahun = Total biaya gudang ÷ Rata-rata stok dus
         // d. H per dus per hari = H per tahun ÷ 365
-        if ($avg_stok_dus > 0 && $total_biaya_gudang_tahun > 0) {
-            $holding_cost_per_dus_per_tahun = $total_biaya_gudang_tahun / $avg_stok_dus;
-            $holding_cost = $holding_cost_per_dus_per_tahun / 365;
-        } else {
-            $holding_cost = 385;
+        // TIDAK ADA DEFAULT - harus dari data hitungan
+        if ($avg_stok_dus <= 0 || $total_biaya_gudang_tahun <= 0) {
+            throw new Exception('Tidak ada data biaya operasional gudang atau stok history untuk menghitung holding cost');
         }
+        $holding_cost_per_dus_per_tahun = $total_biaya_gudang_tahun / $avg_stok_dus;
+        $holding_cost = $holding_cost_per_dus_per_tahun / 365;
         
         // 4. Lead Time
         $query_lead_time = "SELECT AVG(DATEDIFF(pb.WAKTU_SELESAI, pb.WAKTU_PESAN)) as AVG_LEAD_TIME
@@ -474,7 +491,12 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $result_lead_time = $stmt_lead_time->get_result();
         $lead_time_data = $result_lead_time->fetch_assoc();
         $avg_lead_time = floatval($lead_time_data['AVG_LEAD_TIME'] ?? 0);
-        $lead_time = $avg_lead_time > 0 ? round($avg_lead_time) : 2;
+        
+        // TIDAK ADA DEFAULT - harus dari data hitungan
+        if ($avg_lead_time <= 0) {
+            throw new Exception('Tidak ada data lead time dari PESAN_BARANG yang sudah selesai');
+        }
+        $lead_time = round($avg_lead_time);
         
         // 5. Cek interval POQ
         $query_interval_check = "SELECT INTERVAL_HARI FROM PERHITUNGAN_INTERVAL_POQ
