@@ -43,7 +43,7 @@ $stmt_alamat->execute();
 $result_alamat = $stmt_alamat->get_result();
 $alamat_lokasi = $result_alamat->num_rows > 0 ? $result_alamat->fetch_assoc()['ALAMAT_LOKASI'] : '';
 
-// Handle AJAX request untuk get data barang
+// Handle AJAX request untuk get data barang dan batch
 if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
     header('Content-Type: application/json');
     
@@ -54,6 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
         exit();
     }
     
+    // Get data master barang
     $query_barang = "SELECT mb.SATUAN_PERDUS, mb.AVG_HARGA_BELI_PIECES
                     FROM MASTER_BARANG mb
                     WHERE mb.KD_BARANG = ?";
@@ -76,11 +77,72 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
     
     $barang_data = $result_barang->fetch_assoc();
     
+    // Get batch yang tersedia (SISA_STOCK_DUS > 0, STATUS = 'SELESAI')
+    $query_batch = "SELECT 
+        pb.ID_PESAN_BARANG,
+        pb.TGL_EXPIRED,
+        pb.SISA_STOCK_DUS,
+        COALESCE(ms.KD_SUPPLIER, '-') as SUPPLIER_KD,
+        COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER
+    FROM PESAN_BARANG pb
+    LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
+    WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.STATUS = 'SELESAI' AND pb.SISA_STOCK_DUS > 0
+    ORDER BY 
+        CASE 
+            WHEN pb.TGL_EXPIRED IS NULL THEN 999
+            WHEN pb.TGL_EXPIRED < CURDATE() THEN 1
+            WHEN pb.TGL_EXPIRED = CURDATE() THEN 2
+            WHEN pb.TGL_EXPIRED <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 3
+            ELSE 4
+        END ASC,
+        COALESCE(pb.TGL_EXPIRED, '9999-12-31') ASC";
+    $stmt_batch = $conn->prepare($query_batch);
+    if (!$stmt_batch) {
+        echo json_encode(['success' => false, 'message' => 'Gagal prepare query batch: ' . $conn->error]);
+        exit();
+    }
+    $stmt_batch->bind_param("ss", $kd_barang, $kd_lokasi);
+    if (!$stmt_batch->execute()) {
+        echo json_encode(['success' => false, 'message' => 'Gagal execute query batch: ' . $stmt_batch->error]);
+        exit();
+    }
+    $result_batch = $stmt_batch->get_result();
+    
+    $batches = [];
+    while ($row = $result_batch->fetch_assoc()) {
+        // Format supplier
+        $supplier_display = '-';
+        if ($row['SUPPLIER_KD'] != '-' && $row['NAMA_SUPPLIER'] != '-') {
+            $supplier_display = $row['SUPPLIER_KD'] . ' - ' . $row['NAMA_SUPPLIER'];
+        }
+        
+        // Format tanggal expired
+        $tgl_expired_display = '-';
+        if (!empty($row['TGL_EXPIRED'])) {
+            $date_expired = new DateTime($row['TGL_EXPIRED']);
+            $bulan = [
+                1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
+                5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
+                9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
+            ];
+            $tgl_expired_display = $date_expired->format('d') . ' ' . $bulan[(int)$date_expired->format('m')] . ' ' . $date_expired->format('Y');
+        }
+        
+        $batches[] = [
+            'id_pesan_barang' => $row['ID_PESAN_BARANG'],
+            'tgl_expired' => $row['TGL_EXPIRED'],
+            'tgl_expired_display' => $tgl_expired_display,
+            'sisa_stock_dus' => intval($row['SISA_STOCK_DUS']),
+            'supplier' => $supplier_display
+        ];
+    }
+    
     echo json_encode([
         'success' => true,
         'data' => [
             'satuan_perdus' => intval($barang_data['SATUAN_PERDUS'] ?? 1),
-            'avg_harga_beli' => floatval($barang_data['AVG_HARGA_BELI_PIECES'] ?? 0)
+            'avg_harga_beli' => floatval($barang_data['AVG_HARGA_BELI_PIECES'] ?? 0),
+            'batches' => $batches
         ]
     ]);
     exit();
@@ -91,9 +153,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     header('Content-Type: application/json');
     
     $kd_barang = isset($_POST['kd_barang']) ? trim($_POST['kd_barang']) : '';
+    $id_pesan_barang = isset($_POST['id_pesan_barang']) ? trim($_POST['id_pesan_barang']) : '';
     $jumlah_rusak_dus = isset($_POST['jumlah_rusak']) ? intval($_POST['jumlah_rusak']) : 0;
     
-    if (empty($kd_barang)) {
+    if (empty($kd_barang) || empty($id_pesan_barang)) {
         echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
         exit();
     }
@@ -133,16 +196,37 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         $satuan_perdus = intval($barang_data['SATUAN_PERDUS'] ?? 1);
         $avg_harga_beli = floatval($barang_data['AVG_HARGA_BELI_PIECES'] ?? 0);
         
+        // Get data batch yang dipilih
+        $query_batch = "SELECT SISA_STOCK_DUS, TGL_EXPIRED
+                       FROM PESAN_BARANG
+                       WHERE ID_PESAN_BARANG = ? AND KD_BARANG = ? AND KD_LOKASI = ? AND STATUS = 'SELESAI'";
+        $stmt_batch = $conn->prepare($query_batch);
+        if (!$stmt_batch) {
+            throw new Exception('Gagal prepare query batch: ' . $conn->error);
+        }
+        $stmt_batch->bind_param("sss", $id_pesan_barang, $kd_barang, $kd_lokasi);
+        if (!$stmt_batch->execute()) {
+            throw new Exception('Gagal execute query batch: ' . $stmt_batch->error);
+        }
+        $result_batch = $stmt_batch->get_result();
+        
+        if ($result_batch->num_rows == 0) {
+            throw new Exception('Batch tidak ditemukan atau tidak valid!');
+        }
+        
+        $batch_data = $result_batch->fetch_assoc();
+        $sisa_stock_batch_dus = intval($batch_data['SISA_STOCK_DUS'] ?? 0);
+        
+        // Validasi: jumlah rusak tidak boleh melebihi sisa stock batch
+        if ($jumlah_rusak_dus > $sisa_stock_batch_dus) {
+            throw new Exception('Jumlah mutasi tidak boleh melebihi sisa stock batch (' . $sisa_stock_batch_dus . ' dus)!');
+        }
+        
         // Stock gudang selalu DUS, jadi:
         // Konversi jumlah sistem ke DUS jika satuan stock PIECES
         $jumlah_sistem_dus = $jumlah_sistem;
         if ($satuan_stock == 'PIECES') {
             $jumlah_sistem_dus = floor($jumlah_sistem / $satuan_perdus);
-        }
-        
-        // Validasi: jumlah rusak tidak boleh melebihi stock sistem
-        if (abs($jumlah_rusak_dus) > $jumlah_sistem_dus) {
-            throw new Exception('Jumlah mutasi tidak boleh melebihi stock sistem!');
         }
         
         // Hitung stock akhir (dalam DUS)
@@ -170,16 +254,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             $id_mutasi = ShortIdGenerator::generate(16, '');
         } while (checkUUIDExists($conn, 'MUTASI_BARANG_RUSAK', 'ID_MUTASI_BARANG_RUSAK', $id_mutasi));
         
+        // Update SISA_STOCK_DUS di PESAN_BARANG (kurangi dengan jumlah rusak)
+        $sisa_stock_batch_baru = $sisa_stock_batch_dus - $jumlah_rusak_dus;
+        if ($sisa_stock_batch_baru < 0) {
+            $sisa_stock_batch_baru = 0;
+        }
+        
+        $update_batch = "UPDATE PESAN_BARANG 
+                        SET SISA_STOCK_DUS = ?
+                        WHERE ID_PESAN_BARANG = ?";
+        $stmt_update_batch = $conn->prepare($update_batch);
+        if (!$stmt_update_batch) {
+            throw new Exception('Gagal prepare query update batch: ' . $conn->error);
+        }
+        $stmt_update_batch->bind_param("is", $sisa_stock_batch_baru, $id_pesan_barang);
+        if (!$stmt_update_batch->execute()) {
+            throw new Exception('Gagal update batch: ' . $stmt_update_batch->error);
+        }
+        
         // Insert ke MUTASI_BARANG_RUSAK
         // JUMLAH_MUTASI_DUS, TOTAL_BARANG_PIECES, dan TOTAL_UANG harus negatif karena barang rusak
+        // REF menyimpan ID_PESAN_BARANG untuk referensi batch
         $insert_mutasi = "INSERT INTO MUTASI_BARANG_RUSAK 
-                        (ID_MUTASI_BARANG_RUSAK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_MUTASI_DUS, SATUAN_PERDUS, TOTAL_BARANG_PIECES, HARGA_BARANG_PIECES, TOTAL_UANG)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        (ID_MUTASI_BARANG_RUSAK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_MUTASI_DUS, SATUAN_PERDUS, TOTAL_BARANG_PIECES, HARGA_BARANG_PIECES, TOTAL_UANG, REF)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt_mutasi = $conn->prepare($insert_mutasi);
         if (!$stmt_mutasi) {
             throw new Exception('Gagal prepare query mutasi: ' . $conn->error);
         }
-        $stmt_mutasi->bind_param("ssssiiidd", $id_mutasi, $kd_barang, $kd_lokasi, $user_id, $jumlah_mutasi_dus, $satuan_perdus, $total_barang_pieces, $harga_barang_pieces, $total_uang);
+        $stmt_mutasi->bind_param("ssssiiidds", $id_mutasi, $kd_barang, $kd_lokasi, $user_id, $jumlah_mutasi_dus, $satuan_perdus, $total_barang_pieces, $harga_barang_pieces, $total_uang, $id_pesan_barang);
         if (!$stmt_mutasi->execute()) {
             throw new Exception('Gagal insert mutasi: ' . $stmt_mutasi->error);
         }
@@ -335,6 +438,14 @@ $active_page = 'mutasi_barang_rusak';
     <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
     <!-- Custom CSS -->
     <link href="../assets/css/style.css" rel="stylesheet">
+    <style>
+        /* Style untuk option batch yang expired */
+        #mutasi_batch option[data-expired="true"] {
+            background-color: #ffebee !important;
+            color: #c62828 !important;
+            font-weight: bold !important;
+        }
+    </style>
 </head>
 <body class="dashboard-body">
     <?php include 'includes/sidebar.php'; ?>
@@ -432,16 +543,27 @@ $active_page = 'mutasi_barang_rusak';
                                 <label class="form-label fw-bold small">Nama Barang</label>
                                 <input type="text" class="form-control form-control-sm" id="mutasi_nama_barang" readonly style="background-color: #e9ecef;">
                             </div>
+                            <div class="col-md-12">
+                                <label class="form-label fw-bold small">Pilih Batch <span class="text-danger">*</span></label>
+                                <select class="form-select form-select-sm" id="mutasi_batch" name="id_pesan_barang" required>
+                                    <option value="">-- Pilih Batch --</option>
+                                </select>
+                                <small class="text-muted">Batch diurutkan berdasarkan tanggal expired terdekat</small>
+                            </div>
                             <div class="col-md-6">
-                                <label class="form-label fw-bold small">Stock Sekarang (dus)</label>
-                                <input type="text" class="form-control form-control-sm" id="mutasi_stock_sekarang" readonly style="background-color: #e9ecef;">
+                                <label class="form-label fw-bold small">Sisa Stock Batch (dus)</label>
+                                <input type="text" class="form-control form-control-sm" id="mutasi_sisa_stock_batch" readonly style="background-color: #e9ecef;">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold small">Jumlah Rusak (dus) <span class="text-danger">*</span></label>
                                 <input type="number" class="form-control form-control-sm" id="mutasi_jumlah_rusak" name="jumlah_rusak" min="0" step="1" required>
                             </div>
-                            <div class="col-12">
-                                <label class="form-label fw-bold small">Stock Akhir (dus)</label>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small">Sisa Stock Batch Setelah Mutasi (dus)</label>
+                                <input type="text" class="form-control form-control-sm" id="mutasi_sisa_stock_batch_akhir" readonly style="background-color: #e9ecef;">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold small">Stock Sistem Akhir (dus)</label>
                                 <input type="text" class="form-control form-control-sm" id="mutasi_stock_akhir" readonly style="background-color: #e9ecef;">
                             </div>
                         </div>
@@ -496,7 +618,7 @@ $active_page = 'mutasi_barang_rusak';
         }
 
         function bukaModalMutasi(kdBarang, namaMerek, namaKategori, namaBarang, berat, stockSistem, satuan) {
-            // Get data barang untuk mendapatkan satuan perdus
+            // Get data barang dan batch
             $.ajax({
                 url: '',
                 method: 'GET',
@@ -508,6 +630,7 @@ $active_page = 'mutasi_barang_rusak';
                 success: function(response) {
                     if (response.success) {
                         var satuanPerdus = response.data.satuan_perdus || 1;
+                        var batches = response.data.batches || [];
                         
                         // Konversi stock sistem ke DUS untuk display
                         var stockSistemDus = stockSistem;
@@ -522,13 +645,72 @@ $active_page = 'mutasi_barang_rusak';
                         $('#mutasi_kategori_barang').val(namaKategori);
                         $('#mutasi_berat').val(numberFormat(berat));
                         $('#mutasi_nama_barang').val(namaBarang);
-                        $('#mutasi_stock_sekarang').val(numberFormat(stockSistemDus));
+                        
+                        // Populate batch dropdown
+                        var batchSelect = $('#mutasi_batch');
+                        batchSelect.empty();
+                        batchSelect.append('<option value="">-- Pilih Batch --</option>');
+                        
+                        if (batches.length === 0) {
+                            batchSelect.append('<option value="" disabled>Tidak ada batch tersedia</option>');
+                            Swal.fire({
+                                icon: 'warning',
+                                title: 'Peringatan!',
+                                text: 'Tidak ada batch tersedia untuk barang ini!',
+                                confirmButtonColor: '#667eea'
+                            });
+                        } else {
+                            batches.forEach(function(batch) {
+                                // Cek apakah batch sudah expired
+                                var isExpired = false;
+                                if (batch.tgl_expired) {
+                                    var today = new Date();
+                                    today.setHours(0, 0, 0, 0);
+                                    var expiredDate = new Date(batch.tgl_expired);
+                                    expiredDate.setHours(0, 0, 0, 0);
+                                    isExpired = expiredDate < today;
+                                }
+                                
+                                var optionText = batch.id_pesan_barang + ' | Exp: ' + batch.tgl_expired_display;
+                                if (isExpired) {
+                                    optionText += ' ⚠️ [EXPIRED]';
+                                }
+                                optionText += ' | Sisa: ' + numberFormat(batch.sisa_stock_dus) + ' dus';
+                                if (batch.supplier !== '-') {
+                                    optionText += ' | Supplier: ' + batch.supplier;
+                                }
+                                
+                                var option = $('<option>', {
+                                    value: batch.id_pesan_barang,
+                                    text: optionText,
+                                    'data-sisa-stock': batch.sisa_stock_dus,
+                                    'data-tgl-expired': batch.tgl_expired_display,
+                                    'data-expired': isExpired ? 'true' : 'false'
+                                });
+                                
+                                // Tambahkan style untuk batch yang expired
+                                if (isExpired) {
+                                    option.css({
+                                        'background-color': '#ffebee',
+                                        'color': '#c62828',
+                                        'font-weight': 'bold'
+                                    });
+                                }
+                                
+                                batchSelect.append(option);
+                            });
+                        }
+                        
+                        // Reset fields
+                        $('#mutasi_sisa_stock_batch').val('');
                         $('#mutasi_jumlah_rusak').val('');
-                        $('#mutasi_jumlah_rusak').attr('max', stockSistemDus);
+                        $('#mutasi_jumlah_rusak').attr('max', 0);
+                        $('#mutasi_sisa_stock_batch_akhir').val('');
                         $('#mutasi_stock_akhir').val(numberFormat(stockSistemDus));
                         
                         // Store data untuk perhitungan
                         $('#mutasi_stock_sekarang').data('stock-sistem-dus', stockSistemDus);
+                        $('#mutasi_batch').data('batches', batches);
                         
                         // Buka modal
                         $('#modalMutasiBarangRusak').modal('show');
@@ -542,29 +724,35 @@ $active_page = 'mutasi_barang_rusak';
                     }
                 },
                 error: function() {
-                    // Jika AJAX gagal, tetap buka modal dengan data yang ada
-                    var stockSistemDus = stockSistem;
-                    if (satuan == 'PIECES') {
-                        stockSistemDus = Math.floor(stockSistem / 1); // Default satuan perdus = 1
-                    }
-                    
-                    $('#mutasi_kd_barang').val(kdBarang);
-                    $('#mutasi_merek_barang').val(namaMerek);
-                    $('#mutasi_kode_barang').val(kdBarang);
-                    $('#mutasi_kategori_barang').val(namaKategori);
-                    $('#mutasi_berat').val(numberFormat(berat));
-                    $('#mutasi_nama_barang').val(namaBarang);
-                    $('#mutasi_stock_sekarang').val(numberFormat(stockSistemDus));
-                    $('#mutasi_jumlah_rusak').val('');
-                    $('#mutasi_jumlah_rusak').attr('max', stockSistemDus);
-                    $('#mutasi_stock_akhir').val(numberFormat(stockSistemDus));
-                    
-                    $('#mutasi_stock_sekarang').data('stock-sistem-dus', stockSistemDus);
-                    
-                    $('#modalMutasiBarangRusak').modal('show');
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error!',
+                        text: 'Gagal memuat data barang dan batch!',
+                        confirmButtonColor: '#e74c3c'
+                    });
                 }
             });
         }
+
+        // Event listener untuk batch change
+        $(document).on('change', '#mutasi_batch', function() {
+            var selectedOption = $(this).find('option:selected');
+            var sisaStockBatch = parseInt(selectedOption.data('sisa-stock')) || 0;
+            
+            if ($(this).val()) {
+                $('#mutasi_sisa_stock_batch').val(numberFormat(sisaStockBatch));
+                $('#mutasi_jumlah_rusak').attr('max', sisaStockBatch);
+                $('#mutasi_jumlah_rusak').val('');
+                $('#mutasi_sisa_stock_batch_akhir').val(numberFormat(sisaStockBatch));
+                hitungStockAkhir();
+            } else {
+                $('#mutasi_sisa_stock_batch').val('');
+                $('#mutasi_jumlah_rusak').attr('max', 0);
+                $('#mutasi_jumlah_rusak').val('');
+                $('#mutasi_sisa_stock_batch_akhir').val('');
+                hitungStockAkhir();
+            }
+        });
 
         // Event listener untuk hitung stock akhir
         $(document).on('input', '#mutasi_jumlah_rusak', function() {
@@ -573,21 +761,30 @@ $active_page = 'mutasi_barang_rusak';
 
         function hitungStockAkhir() {
             var stockSistemDus = parseInt($('#mutasi_stock_sekarang').data('stock-sistem-dus')) || 0;
+            var selectedOption = $('#mutasi_batch').find('option:selected');
+            var sisaStockBatch = parseInt(selectedOption.data('sisa-stock')) || 0;
             var jumlahRusak = parseInt($('#mutasi_jumlah_rusak').val()) || 0;
             
-            // Validasi: jumlah rusak tidak boleh melebihi stock sistem
-            if (jumlahRusak > stockSistemDus) {
-                $('#mutasi_jumlah_rusak').val(stockSistemDus);
-                jumlahRusak = stockSistemDus;
+            // Validasi: jumlah rusak tidak boleh melebihi sisa stock batch
+            if (jumlahRusak > sisaStockBatch) {
+                $('#mutasi_jumlah_rusak').val(sisaStockBatch);
+                jumlahRusak = sisaStockBatch;
             }
             
-            // Hitung stock akhir
+            // Hitung sisa stock batch setelah mutasi
+            var sisaStockBatchAkhir = sisaStockBatch - jumlahRusak;
+            if (sisaStockBatchAkhir < 0) {
+                sisaStockBatchAkhir = 0;
+            }
+            
+            // Hitung stock sistem akhir (total stock dikurangi jumlah rusak)
             var stockAkhirDus = stockSistemDus - jumlahRusak;
             if (stockAkhirDus < 0) {
                 stockAkhirDus = 0;
             }
             
             // Update tampilan
+            $('#mutasi_sisa_stock_batch_akhir').val(numberFormat(sisaStockBatchAkhir));
             $('#mutasi_stock_akhir').val(numberFormat(stockAkhirDus));
         }
 
@@ -599,8 +796,20 @@ $active_page = 'mutasi_barang_rusak';
             }
 
             var kdBarang = $('#mutasi_kd_barang').val();
+            var idPesanBarang = $('#mutasi_batch').val();
             var jumlahRusak = parseInt($('#mutasi_jumlah_rusak').val()) || 0;
-            var stockSistemDus = parseInt($('#mutasi_stock_sekarang').data('stock-sistem-dus')) || 0;
+            var selectedOption = $('#mutasi_batch').find('option:selected');
+            var sisaStockBatch = parseInt(selectedOption.data('sisa-stock')) || 0;
+
+            if (!idPesanBarang) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error!',
+                    text: 'Silakan pilih batch terlebih dahulu!',
+                    confirmButtonColor: '#e74c3c'
+                });
+                return;
+            }
 
             if (jumlahRusak < 0) {
                 Swal.fire({
@@ -612,11 +821,11 @@ $active_page = 'mutasi_barang_rusak';
                 return;
             }
 
-            if (jumlahRusak > stockSistemDus) {
+            if (jumlahRusak > sisaStockBatch) {
                 Swal.fire({
                     icon: 'error',
                     title: 'Error!',
-                    text: 'Jumlah rusak tidak boleh melebihi stock sistem!',
+                    text: 'Jumlah rusak tidak boleh melebihi sisa stock batch (' + numberFormat(sisaStockBatch) + ' dus)!',
                     confirmButtonColor: '#e74c3c'
                 });
                 return;
@@ -650,6 +859,7 @@ $active_page = 'mutasi_barang_rusak';
                         data: {
                             action: 'simpan_mutasi',
                             kd_barang: kdBarang,
+                            id_pesan_barang: idPesanBarang,
                             jumlah_rusak: jumlahRusak
                         },
                         dataType: 'json',
@@ -711,6 +921,9 @@ $active_page = 'mutasi_barang_rusak';
         // Reset modal saat ditutup
         $('#modalMutasiBarangRusak').on('hidden.bs.modal', function() {
             $('#formMutasi')[0].reset();
+            $('#mutasi_batch').empty();
+            $('#mutasi_sisa_stock_batch').val('');
+            $('#mutasi_sisa_stock_batch_akhir').val('');
             $('#mutasi_stock_akhir').val('');
         });
     </script>

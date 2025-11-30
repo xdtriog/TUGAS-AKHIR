@@ -782,7 +782,9 @@ $query_stock = "SELECT
         WHEN COALESCE(DATE_ADD(poq.WAKTU_PERHITUNGAN_KUANTITAS_POQ, INTERVAL poq.INTERVAL_HARI DAY), '9999-12-31') <= CURDATE() THEN 1
         WHEN COALESCE(DATE_ADD(poq.WAKTU_PERHITUNGAN_KUANTITAS_POQ, INTERVAL poq.INTERVAL_HARI DAY), '9999-12-31') <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 2
         ELSE 3
-    END as PRIORITAS_JATUH_TEMPO
+    END as PRIORITAS_JATUH_TEMPO,
+    COALESCE(pb_terakhir.ID_PERHITUNGAN_KUANTITAS_POQ, NULL) as ID_POQ_TERAKHIR,
+    COALESCE(pb_terakhir.ID_PESAN_BARANG, NULL) as ID_PESAN_BARANG_TERAKHIR
 FROM STOCK s
 INNER JOIN MASTER_BARANG mb ON s.KD_BARANG = mb.KD_BARANG
 LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
@@ -804,6 +806,22 @@ LEFT JOIN (
         AND poq1.KD_LOKASI = poq2.KD_LOKASI 
         AND poq1.WAKTU_PERHITUNGAN_KUANTITAS_POQ = poq2.MAX_WAKTU
 ) poq ON s.KD_BARANG = poq.KD_BARANG AND s.KD_LOKASI = poq.KD_LOKASI
+LEFT JOIN (
+    SELECT 
+        pb1.KD_BARANG,
+        pb1.KD_LOKASI,
+        pb1.ID_PERHITUNGAN_KUANTITAS_POQ,
+        pb1.ID_PESAN_BARANG
+    FROM PESAN_BARANG pb1
+    INNER JOIN (
+        SELECT KD_BARANG, KD_LOKASI, MAX(WAKTU_PESAN) as MAX_WAKTU_PESAN
+        FROM PESAN_BARANG
+        WHERE KD_LOKASI = ?
+        GROUP BY KD_BARANG, KD_LOKASI
+    ) pb2 ON pb1.KD_BARANG = pb2.KD_BARANG 
+        AND pb1.KD_LOKASI = pb2.KD_LOKASI 
+        AND pb1.WAKTU_PESAN = pb2.MAX_WAKTU_PESAN
+) pb_terakhir ON s.KD_BARANG = pb_terakhir.KD_BARANG AND s.KD_LOKASI = pb_terakhir.KD_LOKASI
 WHERE s.KD_LOKASI = ?
 ORDER BY 
     PRIORITAS_JATUH_TEMPO ASC,
@@ -819,14 +837,14 @@ if ($stmt_stock === false) {
     $message_type = 'danger';
     $result_stock = null;
 } else {
-    $stmt_stock->bind_param("ss", $kd_lokasi, $kd_lokasi);
+$stmt_stock->bind_param("sss", $kd_lokasi, $kd_lokasi, $kd_lokasi);
     if (!$stmt_stock->execute()) {
         error_log("Execute Error: " . $stmt_stock->error);
         $message = 'Error menjalankan query: ' . htmlspecialchars($stmt_stock->error);
         $message_type = 'danger';
         $result_stock = null;
     } else {
-        $result_stock = $stmt_stock->get_result();
+$result_stock = $stmt_stock->get_result();
     }
 }
 
@@ -934,14 +952,22 @@ $active_page = 'stock';
                                         <?php else: ?>
                                             <span class="badge bg-secondary">Tidak Aktif</span>
                                         <?php endif; ?>
+                                        <br>
+                                        <?php if (!empty($row['ID_POQ_TERAKHIR'])): ?>
+                                            <span class="badge mt-1" style="background-color: #6f42c1; color: white;">POQ - <?php echo htmlspecialchars($row['ID_POQ_TERAKHIR']); ?></span>
+                                        <?php elseif (!empty($row['ID_PESAN_BARANG_TERAKHIR'])): ?>
+                                            <span class="badge mt-1" style="background-color: #fd7e14; color: white;">Manual</span>
+                                        <?php else: ?>
+                                            <span class="badge bg-secondary mt-1">-</span>
+                                        <?php endif; ?>
                                     </td>
                                     <td>
                                         <div class="d-flex flex-column gap-1">
                                             <button class="btn-view btn-sm" onclick="lihatRiwayatPembelian('<?php echo htmlspecialchars($row['KD_BARANG']); ?>')">Lihat Riwayat Pembelian</button>
                                             <button class="btn-view btn-sm" onclick="lihatExpired('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Lihat Expired</button>
                                             <?php if ($row['STATUS_BARANG'] == 'AKTIF'): ?>
-                                                <button class="btn-view btn-sm" onclick="hitungPOQ('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Hitung POQ</button>
-                                                <button class="btn-view btn-sm" onclick="pesanManual('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Pesan Manual</button>
+                                            <button class="btn-view btn-sm" onclick="hitungPOQ('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Hitung POQ</button>
+                                            <button class="btn-view btn-sm" onclick="pesanManual('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($kd_lokasi); ?>')">Pesan Manual</button>
                                             <?php endif; ?>
                                         </div>
                                     </td>
@@ -1767,7 +1793,7 @@ $active_page = 'stock';
                     isSubmittingPesan = true;
                     $('#btnSimpanPesan').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan...');
                     $('#formPesanManual')[0].submit();
-                }
+        }
             });
         });
         

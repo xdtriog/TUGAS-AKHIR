@@ -43,7 +43,7 @@ $stmt_alamat->execute();
 $result_alamat = $stmt_alamat->get_result();
 $alamat_lokasi = $result_alamat->num_rows > 0 ? $result_alamat->fetch_assoc()['ALAMAT_LOKASI'] : '';
 
-// Handle AJAX request untuk get data barang
+// Handle AJAX request untuk get data barang dan batch
 if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
     header('Content-Type: application/json');
     
@@ -54,7 +54,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
         exit();
     }
     
-    $query_barang = "SELECT mb.SATUAN_PERDUS, mb.BERAT
+    // Get data master barang
+    $query_barang = "SELECT mb.SATUAN_PERDUS, mb.BERAT, mb.AVG_HARGA_BELI_PIECES
                     FROM MASTER_BARANG mb
                     WHERE mb.KD_BARANG = ?";
     $stmt_barang = $conn->prepare($query_barang);
@@ -76,11 +77,73 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
     
     $barang_data = $result_barang->fetch_assoc();
     
+    // Get batch yang tersedia (SISA_STOCK_DUS > 0, STATUS = 'SELESAI')
+    $query_batch = "SELECT 
+        pb.ID_PESAN_BARANG,
+        pb.TGL_EXPIRED,
+        pb.SISA_STOCK_DUS,
+        COALESCE(ms.KD_SUPPLIER, '-') as SUPPLIER_KD,
+        COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER
+    FROM PESAN_BARANG pb
+    LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
+    WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.STATUS = 'SELESAI' AND pb.SISA_STOCK_DUS > 0
+    ORDER BY 
+        CASE 
+            WHEN pb.TGL_EXPIRED IS NULL THEN 999
+            WHEN pb.TGL_EXPIRED < CURDATE() THEN 1
+            WHEN pb.TGL_EXPIRED = CURDATE() THEN 2
+            WHEN pb.TGL_EXPIRED <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 3
+            ELSE 4
+        END ASC,
+        COALESCE(pb.TGL_EXPIRED, '9999-12-31') ASC";
+    $stmt_batch = $conn->prepare($query_batch);
+    if (!$stmt_batch) {
+        echo json_encode(['success' => false, 'message' => 'Gagal prepare query batch: ' . $conn->error]);
+        exit();
+    }
+    $stmt_batch->bind_param("ss", $kd_barang, $kd_lokasi);
+    if (!$stmt_batch->execute()) {
+        echo json_encode(['success' => false, 'message' => 'Gagal execute query batch: ' . $stmt_batch->error]);
+        exit();
+    }
+    $result_batch = $stmt_batch->get_result();
+    
+    $batches = [];
+    while ($row = $result_batch->fetch_assoc()) {
+        // Format supplier
+        $supplier_display = '-';
+        if ($row['SUPPLIER_KD'] != '-' && $row['NAMA_SUPPLIER'] != '-') {
+            $supplier_display = $row['SUPPLIER_KD'] . ' - ' . $row['NAMA_SUPPLIER'];
+        }
+        
+        // Format tanggal expired
+        $tgl_expired_display = '-';
+        if (!empty($row['TGL_EXPIRED'])) {
+            $date_expired = new DateTime($row['TGL_EXPIRED']);
+            $bulan = [
+                1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
+                5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
+                9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
+            ];
+            $tgl_expired_display = $date_expired->format('d') . ' ' . $bulan[(int)$date_expired->format('m')] . ' ' . $date_expired->format('Y');
+        }
+        
+        $batches[] = [
+            'id_pesan_barang' => $row['ID_PESAN_BARANG'],
+            'tgl_expired' => $row['TGL_EXPIRED'],
+            'tgl_expired_display' => $tgl_expired_display,
+            'sisa_stock_dus' => intval($row['SISA_STOCK_DUS']),
+            'supplier' => $supplier_display
+        ];
+    }
+    
     echo json_encode([
         'success' => true,
         'data' => [
             'satuan_perdus' => intval($barang_data['SATUAN_PERDUS'] ?? 1),
-            'berat' => intval($barang_data['BERAT'] ?? 0)
+            'berat' => intval($barang_data['BERAT'] ?? 0),
+            'avg_harga_beli' => floatval($barang_data['AVG_HARGA_BELI_PIECES'] ?? 0),
+            'batches' => $batches
         ]
     ]);
     exit();
@@ -91,10 +154,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     header('Content-Type: application/json');
     
     $kd_barang = isset($_POST['kd_barang']) ? trim($_POST['kd_barang']) : '';
+    $id_pesan_barang = isset($_POST['id_pesan_barang']) ? trim($_POST['id_pesan_barang']) : '';
     $jumlah_sebenarnya_dus = isset($_POST['jumlah_sebenarnya']) ? intval($_POST['jumlah_sebenarnya']) : 0;
     $satuan = 'DUS'; // Selalu DUS sesuai form
     
-    if (empty($kd_barang) || $jumlah_sebenarnya_dus < 0) {
+    if (empty($kd_barang) || empty($id_pesan_barang) || $jumlah_sebenarnya_dus < 0) {
         echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
         exit();
     }
@@ -129,22 +193,36 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         }
         
         $barang_data = $result_barang->fetch_assoc();
-        $jumlah_sistem = intval($barang_data['JUMLAH_SISTEM'] ?? 0);
         $satuan_stock = $barang_data['SATUAN_STOCK'] ?? 'DUS';
         $satuan_perdus = intval($barang_data['SATUAN_PERDUS'] ?? 1);
         $avg_harga_beli = floatval($barang_data['AVG_HARGA_BELI_PIECES'] ?? 0);
         
-        // Stock gudang selalu DUS, jadi:
-        // JUMLAH_SISTEM: dari STOCK, disesuaikan satuan (jika DUS langsung, jika PIECES dikonversi ke DUS)
-        $jumlah_sistem_display = $jumlah_sistem;
-        if ($satuan_stock == 'PIECES') {
-            $jumlah_sistem_display = floor($jumlah_sistem / $satuan_perdus);
+        // Get data batch yang dipilih
+        $query_batch = "SELECT SISA_STOCK_DUS, TGL_EXPIRED
+                       FROM PESAN_BARANG
+                       WHERE ID_PESAN_BARANG = ? AND KD_BARANG = ? AND KD_LOKASI = ? AND STATUS = 'SELESAI'";
+        $stmt_batch = $conn->prepare($query_batch);
+        if (!$stmt_batch) {
+            throw new Exception('Gagal prepare query batch: ' . $conn->error);
+        }
+        $stmt_batch->bind_param("sss", $id_pesan_barang, $kd_barang, $kd_lokasi);
+        if (!$stmt_batch->execute()) {
+            throw new Exception('Gagal execute query batch: ' . $stmt_batch->error);
+        }
+        $result_batch = $stmt_batch->get_result();
+        
+        if ($result_batch->num_rows == 0) {
+            throw new Exception('Batch tidak ditemukan atau tidak valid!');
         }
         
-        // JUMLAH_SEBENARNYA: mengikuti satuan JUMLAH_SISTEM (karena gudang selalu DUS, maka dalam DUS)
-        // Sudah dalam DUS dari form input
+        $batch_data = $result_batch->fetch_assoc();
+        $jumlah_sistem_batch_dus = intval($batch_data['SISA_STOCK_DUS'] ?? 0);
         
-        // SELISIH: dalam satuan yang sama dengan JUMLAH_SISTEM (DUS)
+        // JUMLAH_SISTEM: dari batch (SISA_STOCK_DUS)
+        $jumlah_sistem_display = $jumlah_sistem_batch_dus;
+        
+        // JUMLAH_SEBENARNYA: dari form input (dalam DUS)
+        // SELISIH: dalam DUS
         $selisih_dus = $jumlah_sebenarnya_dus - $jumlah_sistem_display;
         
         // TOTAL_BARANG_PIECES: selisih dalam pieces (bisa negatif)
@@ -195,14 +273,39 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             throw new Exception('Gagal insert opname: ' . $stmt_opname->error);
         }
         
-        // Update STOCK dengan jumlah sebenarnya
-        // Karena stock gudang selalu DUS, update dengan jumlah sebenarnya dalam DUS
-        // Tapi STOCK menyimpan dalam satuan yang ada (DUS atau PIECES), jadi:
-        // - Jika satuan stock DUS: update dengan jumlah_sebenarnya_dus
-        // - Jika satuan stock PIECES: update dengan jumlah_sebenarnya_pieces
-        $jumlah_update_stock = $jumlah_sebenarnya_dus;
+        // Update SISA_STOCK_DUS di PESAN_BARANG dengan jumlah sebenarnya
+        $update_batch = "UPDATE PESAN_BARANG 
+                        SET SISA_STOCK_DUS = ?
+                        WHERE ID_PESAN_BARANG = ?";
+        $stmt_update_batch = $conn->prepare($update_batch);
+        if (!$stmt_update_batch) {
+            throw new Exception('Gagal prepare query update batch: ' . $conn->error);
+        }
+        $stmt_update_batch->bind_param("is", $jumlah_sebenarnya_dus, $id_pesan_barang);
+        if (!$stmt_update_batch->execute()) {
+            throw new Exception('Gagal update batch: ' . $stmt_update_batch->error);
+        }
+        
+        // Update STOCK total dengan sum dari semua SISA_STOCK_DUS dari semua batch
+        $query_sum_batch = "SELECT COALESCE(SUM(SISA_STOCK_DUS), 0) as TOTAL_STOCK_DUS
+                           FROM PESAN_BARANG
+                           WHERE KD_BARANG = ? AND KD_LOKASI = ? AND STATUS = 'SELESAI'";
+        $stmt_sum_batch = $conn->prepare($query_sum_batch);
+        if (!$stmt_sum_batch) {
+            throw new Exception('Gagal prepare query sum batch: ' . $conn->error);
+        }
+        $stmt_sum_batch->bind_param("ss", $kd_barang, $kd_lokasi);
+        if (!$stmt_sum_batch->execute()) {
+            throw new Exception('Gagal execute query sum batch: ' . $stmt_sum_batch->error);
+        }
+        $result_sum_batch = $stmt_sum_batch->get_result();
+        $sum_batch_data = $result_sum_batch->fetch_assoc();
+        $total_stock_dus = intval($sum_batch_data['TOTAL_STOCK_DUS'] ?? 0);
+        
+        // Konversi ke satuan stock yang sesuai
+        $jumlah_update_stock = $total_stock_dus;
         if ($satuan_stock == 'PIECES') {
-            $jumlah_update_stock = $jumlah_sebenarnya_pieces;
+            $jumlah_update_stock = $total_stock_dus * $satuan_perdus;
         }
         
         $update_stock = "UPDATE STOCK 
@@ -226,11 +329,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
         
         // Untuk STOCK_HISTORY, semua dalam DUS (karena stock gudang selalu DUS)
-        // JUMLAH_AWAL: JUMLAH_SISTEM (dalam DUS)
+        // JUMLAH_AWAL: JUMLAH_SISTEM dari batch (dalam DUS)
         // JUMLAH_PERUBAHAN: SELISIH (dalam DUS, bisa positif atau negatif)
         // JUMLAH_AKHIR: JUMLAH_SEBENARNYA (dalam DUS)
         // SATUAN: 'DUS'
-        $jumlah_awal_history = $jumlah_sistem_display; // JUMLAH_SISTEM dalam DUS
+        // REF: ID_PESAN_BARANG untuk referensi batch
+        $jumlah_awal_history = $jumlah_sistem_display; // JUMLAH_SISTEM dari batch dalam DUS
         $jumlah_perubahan_history = $selisih_dus; // SELISIH dalam DUS
         $jumlah_akhir_history = $jumlah_sebenarnya_dus; // JUMLAH_SEBENARNYA dalam DUS
         $satuan_history = 'DUS'; // Stock gudang selalu DUS
@@ -242,7 +346,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         if (!$stmt_history) {
             throw new Exception('Gagal prepare query insert history: ' . $conn->error);
         }
-        $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal_history, $jumlah_perubahan_history, $jumlah_akhir_history, $id_opname, $satuan_history);
+        $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal_history, $jumlah_perubahan_history, $jumlah_akhir_history, $id_pesan_barang, $satuan_history);
         if (!$stmt_history->execute()) {
             throw new Exception('Gagal insert history: ' . $stmt_history->error);
         }
@@ -345,6 +449,14 @@ $active_page = 'stock_opname';
     <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
     <!-- Custom CSS -->
     <link href="../assets/css/style.css" rel="stylesheet">
+    <style>
+        /* Style untuk option batch yang expired */
+        #opname_batch option[data-expired="true"] {
+            background-color: #ffebee !important;
+            color: #c62828 !important;
+            font-weight: bold !important;
+        }
+    </style>
 </head>
 <body class="dashboard-body">
     <?php include 'includes/sidebar.php'; ?>
@@ -438,8 +550,15 @@ $active_page = 'stock_opname';
                                 <label class="form-label fw-bold small">Nama Barang</label>
                                 <input type="text" class="form-control form-control-sm" id="opname_nama_barang" readonly style="background-color: #e9ecef;">
                             </div>
+                            <div class="col-md-12">
+                                <label class="form-label fw-bold small">Pilih Batch <span class="text-danger">*</span></label>
+                                <select class="form-select form-select-sm" id="opname_batch" name="id_pesan_barang" required>
+                                    <option value="">-- Pilih Batch --</option>
+                                </select>
+                                <small class="text-muted">Batch diurutkan berdasarkan tanggal expired terdekat</small>
+                            </div>
                             <div class="col-md-6">
-                                <label class="form-label fw-bold small">Jumlah di sistem (dus)</label>
+                                <label class="form-label fw-bold small">Jumlah di sistem batch (dus)</label>
                                 <input type="text" class="form-control form-control-sm" id="opname_stock_sistem" readonly style="background-color: #e9ecef;">
                             </div>
                             <div class="col-md-6">
@@ -497,7 +616,7 @@ $active_page = 'stock_opname';
         });
 
         function bukaModalOpname(kdBarang, namaMerek, namaKategori, namaBarang, berat, stockSistem, satuan) {
-            // Get data barang untuk mendapatkan satuan perdus
+            // Get data barang dan batch
             $.ajax({
                 url: '',
                 method: 'GET',
@@ -509,12 +628,7 @@ $active_page = 'stock_opname';
                 success: function(response) {
                     if (response.success) {
                         var satuanPerdus = response.data.satuan_perdus || 1;
-                        
-                        // Konversi stock sistem ke DUS untuk display
-                        var stockSistemDus = stockSistem;
-                        if (satuan == 'PIECES') {
-                            stockSistemDus = Math.floor(stockSistem / satuanPerdus);
-                        }
+                        var batches = response.data.batches || [];
                         
                         // Set form values
                         $('#opname_kd_barang').val(kdBarang);
@@ -523,13 +637,70 @@ $active_page = 'stock_opname';
                         $('#opname_kode_barang').val(kdBarang);
                         $('#opname_nama_barang').val(namaBarang);
                         $('#opname_berat').val(numberFormat(berat));
-                        $('#opname_stock_sistem').val(numberFormat(stockSistemDus));
+                        
+                        // Populate batch dropdown
+                        var batchSelect = $('#opname_batch');
+                        batchSelect.empty();
+                        batchSelect.append('<option value="">-- Pilih Batch --</option>');
+                        
+                        if (batches.length === 0) {
+                            batchSelect.append('<option value="" disabled>Tidak ada batch tersedia</option>');
+                            Swal.fire({
+                                icon: 'warning',
+                                title: 'Peringatan!',
+                                text: 'Tidak ada batch tersedia untuk barang ini!',
+                                confirmButtonColor: '#667eea'
+                            });
+                        } else {
+                            batches.forEach(function(batch) {
+                                // Cek apakah batch sudah expired
+                                var isExpired = false;
+                                if (batch.tgl_expired) {
+                                    var today = new Date();
+                                    today.setHours(0, 0, 0, 0);
+                                    var expiredDate = new Date(batch.tgl_expired);
+                                    expiredDate.setHours(0, 0, 0, 0);
+                                    isExpired = expiredDate < today;
+                                }
+                                
+                                var optionText = batch.id_pesan_barang + ' | Exp: ' + batch.tgl_expired_display;
+                                if (isExpired) {
+                                    optionText += ' ⚠️ [EXPIRED]';
+                                }
+                                optionText += ' | Sisa: ' + numberFormat(batch.sisa_stock_dus) + ' dus';
+                                if (batch.supplier !== '-') {
+                                    optionText += ' | Supplier: ' + batch.supplier;
+                                }
+                                
+                                var option = $('<option>', {
+                                    value: batch.id_pesan_barang,
+                                    text: optionText,
+                                    'data-sisa-stock': batch.sisa_stock_dus,
+                                    'data-tgl-expired': batch.tgl_expired_display,
+                                    'data-expired': isExpired ? 'true' : 'false'
+                                });
+                                
+                                // Tambahkan style untuk batch yang expired
+                                if (isExpired) {
+                                    option.css({
+                                        'background-color': '#ffebee',
+                                        'color': '#c62828',
+                                        'font-weight': 'bold'
+                                    });
+                                }
+                                
+                                batchSelect.append(option);
+                            });
+                        }
+                        
+                        // Reset fields
+                        $('#opname_stock_sistem').val('');
                         $('#opname_jumlah_sebenarnya').val('');
                         $('#opname_selisih').val('');
                         
                         // Store data untuk perhitungan
-                        $('#opname_stock_sistem').data('stock-sistem-dus', stockSistemDus);
                         $('#opname_stock_sistem').data('satuan-perdus', satuanPerdus);
+                        $('#opname_batch').data('batches', batches);
                         
                         // Buka modal
                         $('#modalStockOpname').modal('show');
@@ -543,30 +714,35 @@ $active_page = 'stock_opname';
                     }
                 },
                 error: function() {
-                    // Jika AJAX gagal, tetap buka modal dengan data yang ada
-                    var stockSistemDus = stockSistem;
-                    if (satuan == 'PIECES') {
-                        stockSistemDus = Math.floor(stockSistem / 1); // Default satuan perdus = 1
-                    }
-                    
-                    $('#opname_kd_barang').val(kdBarang);
-                    $('#opname_merek_barang').val(namaMerek);
-                    $('#opname_kategori_barang').val(namaKategori);
-                    $('#opname_kode_barang').val(kdBarang);
-                    $('#opname_nama_barang').val(namaBarang);
-                    $('#opname_berat').val(numberFormat(berat));
-                    $('#opname_stock_sistem').val(numberFormat(stockSistemDus));
-                    $('#opname_jumlah_sebenarnya').val('');
-                    $('#opname_selisih').val('');
-                    
-                    $('#opname_stock_sistem').data('stock-sistem-dus', stockSistemDus);
-                    $('#opname_stock_sistem').data('satuan-perdus', 1);
-                    
-                    $('#modalStockOpname').modal('show');
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error!',
+                        text: 'Gagal memuat data barang dan batch!',
+                        confirmButtonColor: '#e74c3c'
+                    });
                 }
             });
         }
 
+
+        // Event listener untuk batch change
+        $(document).on('change', '#opname_batch', function() {
+            var selectedOption = $(this).find('option:selected');
+            var sisaStockBatch = parseInt(selectedOption.data('sisa-stock')) || 0;
+            
+            if ($(this).val()) {
+                $('#opname_stock_sistem').val(numberFormat(sisaStockBatch));
+                $('#opname_stock_sistem').data('stock-sistem-dus', sisaStockBatch);
+                $('#opname_jumlah_sebenarnya').val('');
+                $('#opname_selisih').val('');
+                hitungSelisih();
+            } else {
+                $('#opname_stock_sistem').val('');
+                $('#opname_stock_sistem').data('stock-sistem-dus', 0);
+                $('#opname_jumlah_sebenarnya').val('');
+                $('#opname_selisih').val('');
+            }
+        });
 
         // Event listener untuk hitung selisih
         $(document).on('input', '#opname_jumlah_sebenarnya', function() {
@@ -601,7 +777,18 @@ $active_page = 'stock_opname';
             }
 
             var kdBarang = $('#opname_kd_barang').val();
+            var idPesanBarang = $('#opname_batch').val();
             var jumlahSebenarnya = parseInt($('#opname_jumlah_sebenarnya').val()) || 0;
+
+            if (!idPesanBarang) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error!',
+                    text: 'Silakan pilih batch terlebih dahulu!',
+                    confirmButtonColor: '#e74c3c'
+                });
+                return;
+            }
 
             if (jumlahSebenarnya < 0) {
                 Swal.fire({
@@ -631,6 +818,7 @@ $active_page = 'stock_opname';
                         data: {
                             action: 'simpan_opname',
                             kd_barang: kdBarang,
+                            id_pesan_barang: idPesanBarang,
                             jumlah_sebenarnya: jumlahSebenarnya
                         },
                         dataType: 'json',
@@ -692,6 +880,8 @@ $active_page = 'stock_opname';
         // Reset modal saat ditutup
         $('#modalStockOpname').on('hidden.bs.modal', function() {
             $('#formOpname')[0].reset();
+            $('#opname_batch').empty();
+            $('#opname_stock_sistem').val('');
             $('#opname_selisih').val('');
         });
     </script>
