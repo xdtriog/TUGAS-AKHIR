@@ -105,6 +105,7 @@ $query_riwayat = "SELECT
     pb.WAKTU_ESTIMASI_SELESAI,
     pb.WAKTU_SELESAI,
     pb.STATUS,
+    pb.ID_PERHITUNGAN_KUANTITAS_POQ,
     ml.NAMA_LOKASI,
     COALESCE(ms.KD_SUPPLIER, '-') as SUPPLIER_KD,
     COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER,
@@ -310,32 +311,39 @@ $active_page = 'stock';
                                     ?></td>
                                     <td><?php echo formatRupiah($row['BIAYA_PENGIRIMAAN']); ?></td>
                                     <td>
-                                        <?php 
-                                        $status_text = '';
-                                        $status_class = '';
-                                        switch($row['STATUS']) {
-                                            case 'DIPESAN':
-                                                $status_text = 'Dipesan';
-                                                $status_class = 'warning';
-                                                break;
-                                            case 'DIKIRIM':
-                                                $status_text = 'Dikirim';
-                                                $status_class = 'info';
-                                                break;
-                                            case 'SELESAI':
-                                                $status_text = 'Selesai';
-                                                $status_class = 'success';
-                                                break;
-                                            case 'DIBATALKAN':
-                                                $status_text = 'Dibatalkan';
-                                                $status_class = 'danger';
-                                                break;
-                                            default:
-                                                $status_text = $row['STATUS'];
-                                                $status_class = 'secondary';
-                                        }
-                                        ?>
-                                        <span class="badge bg-<?php echo $status_class; ?>"><?php echo $status_text; ?></span>
+                                        <div class="d-flex flex-column gap-1">
+                                            <?php 
+                                            $status_text = '';
+                                            $status_class = '';
+                                            switch($row['STATUS']) {
+                                                case 'DIPESAN':
+                                                    $status_text = 'Dipesan';
+                                                    $status_class = 'warning';
+                                                    break;
+                                                case 'DIKIRIM':
+                                                    $status_text = 'Dikirim';
+                                                    $status_class = 'info';
+                                                    break;
+                                                case 'SELESAI':
+                                                    $status_text = 'Selesai';
+                                                    $status_class = 'success';
+                                                    break;
+                                                case 'DIBATALKAN':
+                                                    $status_text = 'Dibatalkan';
+                                                    $status_class = 'danger';
+                                                    break;
+                                                default:
+                                                    $status_text = $row['STATUS'];
+                                                    $status_class = 'secondary';
+                                            }
+                                            ?>
+                                            <span class="badge bg-<?php echo $status_class; ?>"><?php echo $status_text; ?></span>
+                                            <?php if (!empty($row['ID_PERHITUNGAN_KUANTITAS_POQ'])): ?>
+                                                <span class="badge mt-1" style="background-color: #6f42c1; color: white;">POQ - <?php echo htmlspecialchars($row['ID_PERHITUNGAN_KUANTITAS_POQ']); ?></span>
+                                            <?php else: ?>
+                                                <span class="badge mt-1" style="background-color: #fd7e14; color: white;">Manual</span>
+                                            <?php endif; ?>
+                                        </div>
                                     </td>
                                     <td>
                                         <div class="d-flex flex-wrap gap-1">

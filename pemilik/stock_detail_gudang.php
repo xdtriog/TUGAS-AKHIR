@@ -952,14 +952,6 @@ $active_page = 'stock';
                                         <?php else: ?>
                                             <span class="badge bg-secondary">Tidak Aktif</span>
                                         <?php endif; ?>
-                                        <br>
-                                        <?php if (!empty($row['ID_POQ_TERAKHIR'])): ?>
-                                            <span class="badge mt-1" style="background-color: #6f42c1; color: white;">POQ - <?php echo htmlspecialchars($row['ID_POQ_TERAKHIR']); ?></span>
-                                        <?php elseif (!empty($row['ID_PESAN_BARANG_TERAKHIR'])): ?>
-                                            <span class="badge mt-1" style="background-color: #fd7e14; color: white;">Manual</span>
-                                        <?php else: ?>
-                                            <span class="badge bg-secondary mt-1">-</span>
-                                        <?php endif; ?>
                                     </td>
                                     <td>
                                         <div class="d-flex flex-column gap-1">
