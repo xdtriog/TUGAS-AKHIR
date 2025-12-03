@@ -44,16 +44,17 @@ if ($lokasi['TYPE_LOKASI'] != 'toko') {
 $query_penjualan = "SELECT 
     nj.ID_NOTA_JUAL,
     nj.WAKTU_NOTA,
-    nj.GRAND_TOTAL,
+    nj.TOTAL_JUAL_BARANG,
+    nj.SUB_TOTAL_JUAL,
     nj.PAJAK,
-    u.NAMA as NAMA_USER,
-    COALESCE(SUM(dnj.JUMLAH_JUAL_BARANG), 0) as JUMLAH_BARANG_TERJUAL
+    nj.GRAND_TOTAL,
+    nj.SUB_TOTAL_BELI,
+    nj.GROSS_PROFIT,
+    u.NAMA as NAMA_USER
 FROM NOTA_JUAL nj
 LEFT JOIN USERS u ON nj.ID_USERS = u.ID_USERS
-INNER JOIN DETAIL_NOTA_JUAL dnj ON nj.ID_NOTA_JUAL = dnj.ID_NOTA_JUAL
 WHERE nj.KD_LOKASI = ?
 AND DATE(nj.WAKTU_NOTA) BETWEEN ? AND ?
-GROUP BY nj.ID_NOTA_JUAL, nj.WAKTU_NOTA, nj.GRAND_TOTAL, nj.PAJAK, u.NAMA
 ORDER BY nj.WAKTU_NOTA DESC, nj.ID_NOTA_JUAL ASC";
 
 $stmt_penjualan = $conn->prepare($query_penjualan);
@@ -64,12 +65,13 @@ $result_penjualan = $stmt_penjualan->get_result();
 // Query untuk mendapatkan summary
 $query_summary = "SELECT 
     COUNT(DISTINCT nj.ID_NOTA_JUAL) as TOTAL_TRANSAKSI,
-    COALESCE(SUM(dnj.JUMLAH_JUAL_BARANG), 0) as TOTAL_BARANG_TERJUAL,
-    COALESCE(SUM(dnj.JUMLAH_JUAL_BARANG * dnj.HARGA_JUAL_BARANG), 0) as TOTAL_PENJUALAN,
+    COALESCE(SUM(nj.TOTAL_JUAL_BARANG), 0) as TOTAL_BARANG_TERJUAL,
+    COALESCE(SUM(nj.SUB_TOTAL_JUAL), 0) as TOTAL_PENJUALAN,
     COALESCE(SUM(nj.PAJAK), 0) as TOTAL_PAJAK,
-    COALESCE(SUM(nj.GRAND_TOTAL), 0) as TOTAL_GRAND_TOTAL
+    COALESCE(SUM(nj.GRAND_TOTAL), 0) as TOTAL_GRAND_TOTAL,
+    COALESCE(SUM(nj.SUB_TOTAL_BELI), 0) as TOTAL_BELI,
+    COALESCE(SUM(nj.GROSS_PROFIT), 0) as TOTAL_GROSS_PROFIT
 FROM NOTA_JUAL nj
-INNER JOIN DETAIL_NOTA_JUAL dnj ON nj.ID_NOTA_JUAL = dnj.ID_NOTA_JUAL
 WHERE nj.KD_LOKASI = ?
 AND DATE(nj.WAKTU_NOTA) BETWEEN ? AND ?";
 
@@ -296,7 +298,15 @@ function formatRupiah($angka) {
             </div>
             <div class="summary-card">
                 <div class="value"><?php echo formatRupiah($summary['TOTAL_PENJUALAN']); ?></div>
-                <div class="label">Total Penjualan</div>
+                <div class="label">Sub Total Jual</div>
+            </div>
+            <div class="summary-card">
+                <div class="value"><?php echo formatRupiah($summary['TOTAL_BELI']); ?></div>
+                <div class="label">Sub Total Beli</div>
+            </div>
+            <div class="summary-card">
+                <div class="value"><?php echo formatRupiah($summary['TOTAL_GROSS_PROFIT']); ?></div>
+                <div class="label">Gross Profit</div>
             </div>
             <div class="summary-card">
                 <div class="value"><?php echo formatRupiah($summary['TOTAL_GRAND_TOTAL']); ?></div>
@@ -327,7 +337,7 @@ function formatRupiah($angka) {
                             <td><?php echo formatWaktu($row['WAKTU_NOTA']); ?></td>
                             <td><?php echo htmlspecialchars($row['ID_NOTA_JUAL']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_USER'] ?? '-'); ?></td>
-                            <td class="text-center"><?php echo number_format($row['JUMLAH_BARANG_TERJUAL'], 0, ',', '.'); ?></td>
+                            <td class="text-center"><?php echo number_format($row['TOTAL_JUAL_BARANG'], 0, ',', '.'); ?></td>
                             <td class="text-right"><?php echo formatRupiah($row['PAJAK']); ?></td>
                             <td class="text-right"><?php echo formatRupiah($row['GRAND_TOTAL']); ?></td>
                         </tr>
@@ -343,7 +353,9 @@ function formatRupiah($angka) {
         <div class="footer-summary">
             <p><strong>Total Transaksi: <?php echo number_format($summary['TOTAL_TRANSAKSI'], 0, ',', '.'); ?></strong></p>
             <p><strong>Total Barang Terjual: <?php echo number_format($summary['TOTAL_BARANG_TERJUAL'], 0, ',', '.'); ?></strong></p>
-            <p><strong>Total Penjualan: <?php echo formatRupiah($summary['TOTAL_PENJUALAN']); ?></strong></p>
+            <p><strong>Sub Total Jual: <?php echo formatRupiah($summary['TOTAL_PENJUALAN']); ?></strong></p>
+            <p><strong>Sub Total Beli: <?php echo formatRupiah($summary['TOTAL_BELI']); ?></strong></p>
+            <p><strong>Gross Profit: <?php echo formatRupiah($summary['TOTAL_GROSS_PROFIT']); ?></strong></p>
             <p><strong>Total Pajak: <?php echo formatRupiah($summary['TOTAL_PAJAK']); ?></strong></p>
             <p class="total">Grand Total: <?php echo formatRupiah($summary['TOTAL_GRAND_TOTAL']); ?></p>
         </div>

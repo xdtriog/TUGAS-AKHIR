@@ -21,10 +21,14 @@ USER_GUDANG = 'GDNGj825'
 USER_TOKO = 'TOKOeLig'
 KD_SUPPLIER_1 = 'NGP9zHgE'
 KD_SUPPLIER_2 = 'NKnVD9E9'
-SATUAN_PERDUS = 12  # 12 pieces per dus
+SATUAN_PERDUS = 25  # 25 pieces per dus (sesuai dengan MASTER_BARANG untuk 4aCSBjQPd3TzFd90)
 HARGA_PESAN_DUS = 125000  # Harga beli per dus
 BIAYA_PENGIRIMAN = 50000  # Biaya pengiriman
 HARGA_JUAL_PIECE = 15000  # Harga jual per piece
+MIN_STOCK_TOKO = 100  # Minimal stock toko dalam PIECES (trigger untuk resupply)
+MAX_STOCK_TOKO = 1000  # Maksimal stock toko dalam PIECES (target setelah resupply)
+MIN_STOCK_GUDANG = 50  # Minimal stock gudang dalam DUS (trigger untuk pemesanan)
+MAX_STOCK_GUDANG = 200  # Maksimal stock gudang dalam DUS (target setelah pemesanan)
 
 # Periode simulasi
 START_DATE = datetime(2024, 1, 1)
@@ -117,12 +121,22 @@ def calculate_avg_harga_beli():
         return total_harga_quantity / total_quantity
     return 0.0
 
-def pesan_barang_baru(tanggal):
-    """Generate pemesanan barang baru"""
+def pesan_barang_baru(tanggal, jumlah_pesan=None):
+    """
+    Generate pemesanan barang baru
+    
+    Args:
+        tanggal: Tanggal barang masuk
+        jumlah_pesan: Jumlah DUS yang dipesan (optional, jika None akan random 50-100)
+    
+    Returns:
+        id_pesan jika berhasil
+    """
     global stock_gudang
     
-    # Jumlah pesan: 50-100 dus
-    jumlah_pesan = random.randint(50, 100)
+    # Jumlah pesan: jika tidak ditentukan, random 50-100 dus
+    if jumlah_pesan is None:
+        jumlah_pesan = random.randint(50, 100)
     
     # Harga pesan: bisa bervariasi sedikit (120000-130000 per dus)
     harga_pesan_dus = random.randint(120000, 130000)
@@ -196,7 +210,21 @@ def pesan_barang_baru(tanggal):
     return id_pesan
 
 def transfer_barang_fifo(tanggal, jumlah_transfer_dus):
-    """Transfer barang dengan logika FEFO (First Expired First Out)"""
+    """
+    Transfer barang dengan logika FEFO (First Expired First Out)
+    
+    Args:
+        tanggal: Tanggal transfer
+        jumlah_transfer_dus: Jumlah DUS yang akan ditransfer dari gudang
+    
+    Returns:
+        transfer_id jika berhasil, None jika gagal
+    
+    Note:
+        - Transfer dalam bentuk DUS dari gudang
+        - DUS akan dikonversi menjadi PIECES saat masuk ke toko (DUS * SATUAN_PERDUS)
+        - Menggunakan logika FEFO untuk memilih batch yang expired terdekat
+    """
     global stock_gudang, stock_toko
     
     if stock_gudang <= 0 or jumlah_transfer_dus <= 0:
@@ -333,10 +361,13 @@ def penjualan(tanggal, jumlah_jual):
     stock_toko_awal = stock_toko
     stock_toko -= jumlah_jual
     
-    # Hitung harga
-    harga_jual = HARGA_JUAL_PIECE
-    pajak = int(jumlah_jual * harga_jual * 0.11)  # 11% PPN
-    grand_total = (jumlah_jual * harga_jual) + pajak
+    # Hitung harga - HARGA_BELI_BARANG dinamis berdasarkan AVG_HARGA_BELI_PIECES saat ini
+    harga_beli = calculate_avg_harga_beli()  # AVG_HARGA_BELI_PIECES pada saat penjualan
+    harga_jual = HARGA_JUAL_PIECE  # Harga jual tetap (misal 15k atau 30k)
+    
+    # Hitung total
+    total_beli_uang = jumlah_jual * harga_beli
+    total_jual_uang = jumlah_jual * harga_jual
     
     # ID
     nota_id = generate_id_nota()
@@ -347,15 +378,19 @@ def penjualan(tanggal, jumlah_jual):
     minute = random.randint(0, 59)
     waktu_nota = tanggal.replace(hour=hour, minute=minute, second=random.randint(0, 59))
     
-    # NOTA_JUAL
+    # NOTA_JUAL (akan di-update nanti dengan total dari semua detail)
     sales_data.append({
         'type': 'nota',
         'ID_NOTA_JUAL': nota_id,
         'ID_USERS': USER_TOKO,
         'KD_LOKASI': KD_LOKASI_TOKO,
         'WAKTU_NOTA': waktu_nota.strftime('%Y-%m-%d %H:%M:%S'),
-        'GRAND_TOTAL': grand_total,
-        'PAJAK': pajak
+        'TOTAL_JUAL_BARANG': jumlah_jual,  # Sementara, akan di-aggregate nanti
+        'SUB_TOTAL_JUAL': total_jual_uang,  # Sementara
+        'SUB_TOTAL_BELI': total_beli_uang,  # Sementara
+        'GROSS_PROFIT': total_jual_uang - total_beli_uang,  # Sementara
+        'PAJAK': 0,  # Akan dihitung setelah aggregate
+        'GRAND_TOTAL': 0  # Akan dihitung setelah aggregate
     })
     
     # DETAIL_NOTA_JUAL
@@ -365,7 +400,10 @@ def penjualan(tanggal, jumlah_jual):
         'KD_BARANG': KD_BARANG,
         'ID_NOTA_JUAL': nota_id,
         'JUMLAH_JUAL_BARANG': jumlah_jual,
-        'HARGA_JUAL_BARANG': harga_jual
+        'HARGA_JUAL_BARANG': harga_jual,
+        'TOTAL_JUAL_UANG': total_jual_uang,
+        'HARGA_BELI_BARANG': harga_beli,
+        'TOTAL_BELI_UANG': total_beli_uang
     })
     
     # STOCK_HISTORY - Penjualan
@@ -400,27 +438,49 @@ last_transfer_date = None
 print("Memulai simulasi...")
 
 while current_date <= END_DATE:
-    # 1. PESAN BARANG (setiap 15 hari atau jika stock gudang < 50)
-    if (last_pesan_date is None or (current_date - last_pesan_date).days >= 15) or stock_gudang < 50:
-        if stock_gudang < 50:
-            # Pemesanan darurat jika stock habis
-            pesan_date = current_date
-        else:
-            # Pemesanan rutin
-            pesan_date = current_date - timedelta(days=2)  # Pesan 2 hari sebelum masuk
+    # 1. PESAN BARANG (pemesanan ketika stock gudang mendekati minimal stock)
+    # Pemesanan terjadi ketika stock gudang <= MIN_STOCK_GUDANG
+    if stock_gudang <= MIN_STOCK_GUDANG:
+        # Hitung kebutuhan: target mencapai MAX_STOCK_GUDANG atau minimal 100 DUS lebih dari MIN_STOCK
+        kebutuhan_dus = max(MAX_STOCK_GUDANG - stock_gudang, MIN_STOCK_GUDANG + 100 - stock_gudang)
         
-        pesan_barang_baru(pesan_date)
-        last_pesan_date = pesan_date
-        print(f"  [{current_date.strftime('%Y-%m-%d')}] Pemesanan baru: {batch_stock[list(batch_stock.keys())[-1]]} DUS, Stock gudang: {stock_gudang} DUS")
+        # Minimal pemesanan 50 DUS untuk efisiensi, maksimal 200 DUS
+        if kebutuhan_dus >= 50:
+            # Batasi maksimal 200 DUS per pemesanan
+            jumlah_pesan_dus = min(kebutuhan_dus, 200)
+            
+            # Simpan stock sebelum pemesanan
+            stock_gudang_sebelum = stock_gudang
+            
+            # Pemesanan dilakukan 2 hari sebelum barang masuk
+            pesan_date = current_date - timedelta(days=2)
+            pesan_barang_baru(pesan_date, jumlah_pesan_dus)
+            last_pesan_date = pesan_date
+            
+            # Stock sudah di-update di dalam fungsi pesan_barang_baru()
+            print(f"  [{current_date.strftime('%Y-%m-%d')}] Pemesanan baru: {jumlah_pesan_dus} DUS, Stock gudang: {stock_gudang_sebelum} -> {stock_gudang} DUS")
     
-    # 2. TRANSFER BARANG (setiap 2-4 hari atau jika stock toko < 100 pieces)
+    # 2. TRANSFER BARANG (resupply ketika stock toko mendekati minimal stock)
+    # Transfer terjadi ketika stock toko <= MIN_STOCK_TOKO
+    # Transfer dalam bentuk DUS, yang akan dikonversi menjadi PIECES (lebih banyak)
     if stock_gudang > 0:
-        if (last_transfer_date is None or (current_date - last_transfer_date).days >= random.randint(2, 4)) or stock_toko < 100:
-            jumlah_transfer = random.randint(10, 30) if stock_toko >= 100 else random.randint(20, 40)
-            transfer_id = transfer_barang_fifo(current_date, jumlah_transfer)
-            if transfer_id:
-                last_transfer_date = current_date
-                print(f"  [{current_date.strftime('%Y-%m-%d')}] Transfer: {jumlah_transfer} DUS, Stock toko: {stock_toko} PIECES")
+        # Cek apakah perlu resupply (stock toko <= minimal stock)
+        if stock_toko <= MIN_STOCK_TOKO:
+            # Hitung kebutuhan: target mencapai MAX_STOCK_TOKO atau minimal 200 pieces lebih dari MIN_STOCK
+            kebutuhan_pieces = max(MAX_STOCK_TOKO - stock_toko, MIN_STOCK_TOKO + 200 - stock_toko)
+            # Konversi kebutuhan pieces ke DUS (bulatkan ke atas)
+            kebutuhan_dus = (kebutuhan_pieces + SATUAN_PERDUS - 1) // SATUAN_PERDUS  # Ceiling division
+            
+            # Batasi dengan stock gudang yang tersedia
+            jumlah_transfer_dus = min(kebutuhan_dus, stock_gudang)
+            
+            # Minimal transfer 5 DUS untuk efisiensi
+            if jumlah_transfer_dus >= 5:
+                transfer_id = transfer_barang_fifo(current_date, jumlah_transfer_dus)
+                if transfer_id:
+                    last_transfer_date = current_date
+                    jumlah_transfer_pieces = jumlah_transfer_dus * SATUAN_PERDUS
+                    print(f"  [{current_date.strftime('%Y-%m-%d')}] Resupply: {jumlah_transfer_dus} DUS ({jumlah_transfer_pieces} PIECES), Stock toko: {stock_toko} -> {stock_toko + jumlah_transfer_pieces} PIECES")
     
     # 3. PENJUALAN (setiap hari, 2-5 transaksi)
     if stock_toko > 0:
@@ -488,23 +548,57 @@ with open('detail_transfer_barang_batch.csv', 'w', newline='', encoding='utf-8')
                             t['JUMLAH_PESAN_TRANSFER_BATCH_DUS'], t['JUMLAH_KIRIM_DUS'], t['JUMLAH_TIBA_DUS'],
                             t['JUMLAH_DITOLAK_DUS'], t['JUMLAH_MASUK_DUS']])
 
-# NOTA_JUAL
+# NOTA_JUAL - Aggregate data dari detail
+nota_dict = {}
+for s in sales_data:
+    if s['type'] == 'nota':
+        nota_id = s['ID_NOTA_JUAL']
+        nota_dict[nota_id] = {
+            'ID_NOTA_JUAL': nota_id,
+            'ID_USERS': s['ID_USERS'],
+            'KD_LOKASI': s['KD_LOKASI'],
+            'WAKTU_NOTA': s['WAKTU_NOTA'],
+            'TOTAL_JUAL_BARANG': 0,
+            'SUB_TOTAL_JUAL': 0,
+            'SUB_TOTAL_BELI': 0,
+            'GROSS_PROFIT': 0
+        }
+
+# Aggregate dari detail_nota
+for s in sales_data:
+    if s['type'] == 'detail_nota':
+        nota_id = s['ID_NOTA_JUAL']
+        if nota_id in nota_dict:
+            nota_dict[nota_id]['TOTAL_JUAL_BARANG'] += s['JUMLAH_JUAL_BARANG']
+            nota_dict[nota_id]['SUB_TOTAL_JUAL'] += s['TOTAL_JUAL_UANG']
+            nota_dict[nota_id]['SUB_TOTAL_BELI'] += s['TOTAL_BELI_UANG']
+
+# Hitung GROSS_PROFIT, PAJAK, dan GRAND_TOTAL
+for nota_id, nota in nota_dict.items():
+    nota['GROSS_PROFIT'] = nota['SUB_TOTAL_JUAL'] - nota['SUB_TOTAL_BELI']
+    nota['PAJAK'] = round(nota['SUB_TOTAL_JUAL'] * 0.11, 2)  # 11% PPN
+    nota['GRAND_TOTAL'] = nota['SUB_TOTAL_JUAL'] + nota['PAJAK']
+
+# Write NOTA_JUAL
 with open('nota_jual.csv', 'w', newline='', encoding='utf-8') as f:
     writer = csv.writer(f)
-    writer.writerow(['ID_NOTA_JUAL', 'ID_USERS', 'KD_LOKASI', 'WAKTU_NOTA', 'GRAND_TOTAL', 'PAJAK'])
-    for s in sales_data:
-        if s['type'] == 'nota':
-            writer.writerow([s['ID_NOTA_JUAL'], s['ID_USERS'], s['KD_LOKASI'], s['WAKTU_NOTA'],
-                            s['GRAND_TOTAL'], s['PAJAK']])
+    writer.writerow(['ID_NOTA_JUAL', 'ID_USERS', 'KD_LOKASI', 'WAKTU_NOTA', 'TOTAL_JUAL_BARANG',
+                     'SUB_TOTAL_JUAL', 'PAJAK', 'GRAND_TOTAL', 'SUB_TOTAL_BELI', 'GROSS_PROFIT'])
+    for nota in sorted(nota_dict.values(), key=lambda x: x['WAKTU_NOTA']):
+        writer.writerow([nota['ID_NOTA_JUAL'], nota['ID_USERS'], nota['KD_LOKASI'], nota['WAKTU_NOTA'],
+                         nota['TOTAL_JUAL_BARANG'], nota['SUB_TOTAL_JUAL'], nota['PAJAK'],
+                         nota['GRAND_TOTAL'], nota['SUB_TOTAL_BELI'], nota['GROSS_PROFIT']])
 
 # DETAIL_NOTA_JUAL
 with open('detail_nota_jual.csv', 'w', newline='', encoding='utf-8') as f:
     writer = csv.writer(f)
-    writer.writerow(['ID_DNJB', 'KD_BARANG', 'ID_NOTA_JUAL', 'JUMLAH_JUAL_BARANG', 'HARGA_JUAL_BARANG'])
+    writer.writerow(['ID_DNJB', 'KD_BARANG', 'ID_NOTA_JUAL', 'JUMLAH_JUAL_BARANG', 'HARGA_JUAL_BARANG',
+                     'TOTAL_JUAL_UANG', 'HARGA_BELI_BARANG', 'TOTAL_BELI_UANG'])
     for s in sales_data:
         if s['type'] == 'detail_nota':
             writer.writerow([s['ID_DNJB'], s['KD_BARANG'], s['ID_NOTA_JUAL'], s['JUMLAH_JUAL_BARANG'],
-                            s['HARGA_JUAL_BARANG']])
+                            s['HARGA_JUAL_BARANG'], s['TOTAL_JUAL_UANG'], s['HARGA_BELI_BARANG'],
+                            s['TOTAL_BELI_UANG']])
 
 # STOCK_HISTORY
 with open('stock_history_all.csv', 'w', newline='', encoding='utf-8') as f:
@@ -523,9 +617,9 @@ with open('stock.csv', 'w', newline='', encoding='utf-8') as f:
     writer = csv.writer(f)
     writer.writerow(['KD_BARANG', 'KD_LOKASI', 'UPDATED_BY', 'JUMLAH_BARANG', 'JUMLAH_MIN_STOCK', 'JUMLAH_MAX_STOCK',
                      'SATUAN', 'LAST_UPDATED'])
-    writer.writerow([KD_BARANG, KD_LOKASI_GUDANG, USER_GUDANG, stock_gudang, 50, 200, 'DUS',
+    writer.writerow([KD_BARANG, KD_LOKASI_GUDANG, USER_GUDANG, stock_gudang, MIN_STOCK_GUDANG, MAX_STOCK_GUDANG, 'DUS',
                      today.strftime('%Y-%m-%d %H:%M:%S')])
-    writer.writerow([KD_BARANG, KD_LOKASI_TOKO, USER_TOKO, stock_toko, 100, 1000, 'PIECES',
+    writer.writerow([KD_BARANG, KD_LOKASI_TOKO, USER_TOKO, stock_toko, MIN_STOCK_TOKO, MAX_STOCK_TOKO, 'PIECES',
                      today.strftime('%Y-%m-%d %H:%M:%S')])
 
 # ===== UPDATE MASTER_BARANG =====

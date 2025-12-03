@@ -175,8 +175,7 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             INNER JOIN MASTER_LOKASI ml ON nj.KD_LOKASI = ml.KD_LOKASI
             WHERE dnj.KD_BARANG = ? 
             AND ml.TYPE_LOKASI = 'toko'  -- Penjualan dari SEMUA TOKO
-            AND nj.WAKTU_NOTA >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
-            AND nj.WAKTU_NOTA <= CURDATE()";
+            AND nj.WAKTU_NOTA >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)";
             $stmt_demand = $conn->prepare($query_demand);
             $stmt_demand->bind_param("s", $kd_barang_ajax);
             $stmt_demand->execute();
@@ -196,10 +195,14 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             
             // 2. Hitung SETUP COST (S) - biaya tetap setiap kali pemesanan
             // Ambil rata-rata BIAYA_PENGIRIMAAN dari PESAN_BARANG (biaya admin + bongkar muat)
+            // Filter 1 tahun terakhir untuk konsistensi dengan logika Rolling 1 Year
             $query_setup = "SELECT 
                 COALESCE(AVG(pb.BIAYA_PENGIRIMAAN), 0) as AVG_BIAYA_PENGIRIMAAN
             FROM PESAN_BARANG pb
-            WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.BIAYA_PENGIRIMAAN > 0";
+            WHERE pb.KD_BARANG = ? 
+            AND pb.KD_LOKASI = ? 
+            AND pb.BIAYA_PENGIRIMAAN > 0
+            AND pb.WAKTU_PESAN >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)";
             $stmt_setup = $conn->prepare($query_setup);
             $stmt_setup->bind_param("ss", $kd_barang_ajax, $kd_lokasi_ajax);
             $stmt_setup->execute();
@@ -231,33 +234,34 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             $biaya_gudang_data = $result_biaya_gudang->fetch_assoc();
             $total_biaya_gudang_tahun = floatval($biaya_gudang_data['TOTAL_BIAYA_GUDANG_TAHUN'] ?? 0);
             
-            // b. Hitung rata-rata jumlah dus yang tersimpan di gudang selama 1 tahun UNTUK BARANG INI
-            // Ambil stok akhir setiap hari dari STOCK_HISTORY (untuk gudang, SATUAN = 'DUS', per barang)
-            $query_avg_stok_dus = "SELECT 
-                AVG(sh.JUMLAH_AKHIR) as AVG_STOK_DUS
+            // b. Hitung TOTAL rata-rata jumlah dus yang tersimpan di gudang selama 1 tahun
+            // UNTUK SEMUA BARANG (bukan hanya barang ini)
+            // Ambil stok akhir setiap hari dari STOCK_HISTORY (untuk gudang, SATUAN = 'DUS', semua barang)
+            $query_total_avg_stok_dus = "SELECT 
+                AVG(sh.JUMLAH_AKHIR) as TOTAL_AVG_STOK_DUS
             FROM STOCK_HISTORY sh
-            WHERE sh.KD_BARANG = ?
-            AND sh.KD_LOKASI = ?
+            WHERE sh.KD_LOKASI = ?
             AND sh.SATUAN = 'DUS'
             AND sh.WAKTU_CHANGE >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
             AND sh.JUMLAH_AKHIR >= 0";
-            $stmt_avg_stok = $conn->prepare($query_avg_stok_dus);
-            $stmt_avg_stok->bind_param("ss", $kd_barang_ajax, $kd_lokasi_ajax);
-            $stmt_avg_stok->execute();
-            $result_avg_stok = $stmt_avg_stok->get_result();
-            $avg_stok_data = $result_avg_stok->fetch_assoc();
-            $avg_stok_dus = floatval($avg_stok_data['AVG_STOK_DUS'] ?? 0);
+            $stmt_total_avg_stok = $conn->prepare($query_total_avg_stok_dus);
+            $stmt_total_avg_stok->bind_param("s", $kd_lokasi_ajax);
+            $stmt_total_avg_stok->execute();
+            $result_total_avg_stok = $stmt_total_avg_stok->get_result();
+            $total_avg_stok_data = $result_total_avg_stok->fetch_assoc();
+            $total_avg_stok_dus = floatval($total_avg_stok_data['TOTAL_AVG_STOK_DUS'] ?? 0);
             
-            // c. H per dus per tahun = Total biaya gudang ÷ Rata-rata stok dus
+            // c. H per dus per tahun = Total biaya gudang ÷ Total rata-rata stok dus (SEMUA BARANG)
             // d. H per dus per hari = H per tahun ÷ 365
             // TIDAK ADA DEFAULT - harus dari data hitungan
-            if ($avg_stok_dus <= 0 || $total_biaya_gudang_tahun <= 0) {
+            if ($total_avg_stok_dus <= 0 || $total_biaya_gudang_tahun <= 0) {
                 throw new Exception('Tidak ada data biaya operasional gudang atau stok history untuk menghitung holding cost');
             }
-            $holding_cost_per_dus_per_tahun = $total_biaya_gudang_tahun / $avg_stok_dus;
+            $holding_cost_per_dus_per_tahun = $total_biaya_gudang_tahun / $total_avg_stok_dus;
             $holding_cost = $holding_cost_per_dus_per_tahun / 365;
             
             // 4. Hitung LEAD TIME (rata-rata waktu pengiriman dari supplier)
+            // Filter 1 tahun terakhir untuk konsistensi dengan logika Rolling 1 Year
             $query_lead_time = "SELECT 
                 AVG(DATEDIFF(pb.WAKTU_SELESAI, pb.WAKTU_PESAN)) as AVG_LEAD_TIME
             FROM PESAN_BARANG pb
@@ -266,7 +270,8 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             AND pb.STATUS = 'SELESAI'
             AND pb.WAKTU_PESAN IS NOT NULL
             AND pb.WAKTU_SELESAI IS NOT NULL
-            AND DATEDIFF(pb.WAKTU_SELESAI, pb.WAKTU_PESAN) > 0";
+            AND DATEDIFF(pb.WAKTU_SELESAI, pb.WAKTU_PESAN) > 0
+            AND pb.WAKTU_PESAN >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)";
             $stmt_lead_time = $conn->prepare($query_lead_time);
             $stmt_lead_time->bind_param("ss", $kd_barang_ajax, $kd_lokasi_ajax);
             $stmt_lead_time->execute();
@@ -296,33 +301,31 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             
             // 6. Hitung INTERVAL POQ Optimal (T*) dalam hari
             // Jika interval sudah ada, gunakan yang ada, jika belum hitung baru
+            $interval_hari_raw = null;
             if ($has_interval && $existing_interval > 0) {
                 $interval_hari = $existing_interval;
+                $interval_hari_raw = $existing_interval; // Jika sudah ada, raw = rounded
             } else {
                 // Rumus: T* = √(2 × S / (D × H))
                 if ($demand_rate > 0 && $holding_cost > 0) {
-                    $interval_hari = sqrt((2 * $setup_cost) / ($demand_rate * $holding_cost));
-                    $interval_hari = round($interval_hari);
+                    $interval_hari_raw = sqrt((2 * $setup_cost) / ($demand_rate * $holding_cost));
+                    $interval_hari = ceil($interval_hari_raw); // Round up ke hari terdekat
                     // Minimum 1 hari
                     if ($interval_hari < 1) {
                         $interval_hari = 1;
                     }
                 } else {
+                    $interval_hari_raw = 1;
                     $interval_hari = 1;
                 }
             }
             
             // 7. Hitung KUANTITAS POQ (Q*) yang harus dipesan saat ini
             // Q* = (D × T*) + (D × LeadTime) - Stok_Sekarang_dus
-            $kuantitas_poq_dus = ($demand_rate * $interval_hari) + ($demand_rate * $lead_time) - $stock_sekarang;
+            $kuantitas_poq_dus_raw = ($demand_rate * $interval_hari) + ($demand_rate * $lead_time) - $stock_sekarang;
             
-            // Jika hasil negatif → 0 (tidak perlu pesan)
-            if ($kuantitas_poq_dus < 0) {
-                $kuantitas_poq_dus = 0;
-            }
-            
-            // Dibulatkan ke atas (CEIL) ke dus utuh
-            $kuantitas_poq_dus = ceil($kuantitas_poq_dus);
+            // Hitung nilai yang sudah di-round up (untuk disimpan)
+            $kuantitas_poq_dus_rounded = ceil($kuantitas_poq_dus_raw);
             
             header('Content-Type: application/json');
             echo json_encode([
@@ -338,12 +341,14 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
                 'setup_cost' => $setup_cost,
                 'holding_cost' => $holding_cost,
                 'lead_time' => $lead_time,
-                'interval_hari' => $interval_hari,
-                'kuantitas_poq' => $kuantitas_poq_dus,
+                'interval_hari_raw' => $interval_hari_raw, // Nilai real (bisa desimal)
+                'interval_hari' => $interval_hari, // Nilai yang sudah di-round up (untuk disimpan)
+                'kuantitas_poq_raw' => $kuantitas_poq_dus_raw, // Nilai real (bisa negatif)
+                'kuantitas_poq' => $kuantitas_poq_dus_rounded, // Nilai yang sudah di-round up (untuk disimpan)
                 'has_interval' => $has_interval,
                 'total_dus_year' => $total_dus_terjual,
                 'total_biaya_gudang_tahun' => $total_biaya_gudang_tahun,
-                'avg_stok_dus' => $avg_stok_dus
+                'total_avg_stok_dus' => $total_avg_stok_dus
             ]);
             exit();
         } catch (Exception $e) {
@@ -422,9 +427,13 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $demand_rate = $total_dus_terjual / 365;
         
         // 2. Setup Cost (S) - biaya tetap pemesanan
+        // Filter 1 tahun terakhir untuk konsistensi dengan logika Rolling 1 Year
         $query_setup = "SELECT COALESCE(AVG(pb.BIAYA_PENGIRIMAAN), 0) as AVG_BIAYA
                        FROM PESAN_BARANG pb
-                       WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.BIAYA_PENGIRIMAAN > 0";
+                       WHERE pb.KD_BARANG = ? 
+                       AND pb.KD_LOKASI = ? 
+                       AND pb.BIAYA_PENGIRIMAAN > 0
+                       AND pb.WAKTU_PESAN >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)";
         $stmt_setup = $conn->prepare($query_setup);
         $stmt_setup->bind_param("ss", $kd_barang, $kd_lokasi);
         $stmt_setup->execute();
@@ -456,37 +465,43 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $biaya_gudang_data = $result_biaya_gudang->fetch_assoc();
         $total_biaya_gudang_tahun = floatval($biaya_gudang_data['TOTAL_BIAYA_GUDANG_TAHUN'] ?? 0);
         
-        // b. Rata-rata stok dus di gudang 1 tahun UNTUK BARANG INI
-        $query_avg_stok_dus = "SELECT AVG(sh.JUMLAH_AKHIR) as AVG_STOK_DUS
-                              FROM STOCK_HISTORY sh
-                              WHERE sh.KD_BARANG = ?
-                              AND sh.KD_LOKASI = ?
-                              AND sh.SATUAN = 'DUS'
-                              AND sh.WAKTU_CHANGE >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
-                              AND sh.JUMLAH_AKHIR >= 0";
-        $stmt_avg_stok = $conn->prepare($query_avg_stok_dus);
-        $stmt_avg_stok->bind_param("ss", $kd_barang, $kd_lokasi);
-        $stmt_avg_stok->execute();
-        $result_avg_stok = $stmt_avg_stok->get_result();
-        $avg_stok_data = $result_avg_stok->fetch_assoc();
-        $avg_stok_dus = floatval($avg_stok_data['AVG_STOK_DUS'] ?? 0);
+        // b. Hitung TOTAL rata-rata jumlah dus yang tersimpan di gudang selama 1 tahun
+        // UNTUK SEMUA BARANG (bukan hanya barang ini)
+        // Ambil stok akhir setiap hari dari STOCK_HISTORY (untuk gudang, SATUAN = 'DUS', semua barang)
+        $query_total_avg_stok_dus = "SELECT 
+            AVG(sh.JUMLAH_AKHIR) as TOTAL_AVG_STOK_DUS
+        FROM STOCK_HISTORY sh
+        WHERE sh.KD_LOKASI = ?
+        AND sh.SATUAN = 'DUS'
+        AND sh.WAKTU_CHANGE >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+        AND sh.JUMLAH_AKHIR >= 0";
+        $stmt_total_avg_stok = $conn->prepare($query_total_avg_stok_dus);
+        $stmt_total_avg_stok->bind_param("s", $kd_lokasi);
+        $stmt_total_avg_stok->execute();
+        $result_total_avg_stok = $stmt_total_avg_stok->get_result();
+        $total_avg_stok_data = $result_total_avg_stok->fetch_assoc();
+        $total_avg_stok_dus = floatval($total_avg_stok_data['TOTAL_AVG_STOK_DUS'] ?? 0);
         
-        // c. H per dus per tahun = Total biaya gudang ÷ Rata-rata stok dus
+        // c. H per dus per tahun = Total biaya gudang ÷ Total rata-rata stok dus (SEMUA BARANG)
         // d. H per dus per hari = H per tahun ÷ 365
         // TIDAK ADA DEFAULT - harus dari data hitungan
-        if ($avg_stok_dus <= 0 || $total_biaya_gudang_tahun <= 0) {
+        if ($total_avg_stok_dus <= 0 || $total_biaya_gudang_tahun <= 0) {
             throw new Exception('Tidak ada data biaya operasional gudang atau stok history untuk menghitung holding cost');
         }
-        $holding_cost_per_dus_per_tahun = $total_biaya_gudang_tahun / $avg_stok_dus;
+        $holding_cost_per_dus_per_tahun = $total_biaya_gudang_tahun / $total_avg_stok_dus;
         $holding_cost = $holding_cost_per_dus_per_tahun / 365;
         
         // 4. Lead Time
+        // Filter 1 tahun terakhir untuk konsistensi dengan logika Rolling 1 Year
         $query_lead_time = "SELECT AVG(DATEDIFF(pb.WAKTU_SELESAI, pb.WAKTU_PESAN)) as AVG_LEAD_TIME
                            FROM PESAN_BARANG pb
-                           WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ?
+                           WHERE pb.KD_BARANG = ? 
+                           AND pb.KD_LOKASI = ?
                            AND pb.STATUS = 'SELESAI'
-                           AND pb.WAKTU_PESAN IS NOT NULL AND pb.WAKTU_SELESAI IS NOT NULL
-                           AND DATEDIFF(pb.WAKTU_SELESAI, pb.WAKTU_PESAN) > 0";
+                           AND pb.WAKTU_PESAN IS NOT NULL 
+                           AND pb.WAKTU_SELESAI IS NOT NULL
+                           AND DATEDIFF(pb.WAKTU_SELESAI, pb.WAKTU_PESAN) > 0
+                           AND pb.WAKTU_PESAN >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR)";
         $stmt_lead_time = $conn->prepare($query_lead_time);
         $stmt_lead_time->bind_param("ss", $kd_barang, $kd_lokasi);
         $stmt_lead_time->execute();
@@ -518,7 +533,7 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         } else {
             if ($demand_rate > 0 && $holding_cost > 0) {
                 $interval_hari = sqrt((2 * $setup_cost) / ($demand_rate * $holding_cost));
-                $interval_hari = round($interval_hari);
+                $interval_hari = ceil($interval_hari); // Round up ke hari terdekat
                 if ($interval_hari < 1) {
                     $interval_hari = 1;
                 }
@@ -529,15 +544,16 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         
         // 7. Hitung Kuantitas POQ (Q*) dalam dus
         // Q* = (D × T*) + (D × LeadTime) - Stok_Sekarang_dus
-        $kuantitas_poq = ($demand_rate * $interval_hari) + ($demand_rate * $lead_time) - $stock_sekarang;
+        $kuantitas_poq_raw = ($demand_rate * $interval_hari) + ($demand_rate * $lead_time) - $stock_sekarang;
         
-        // Jika hasil negatif → 0 (tidak perlu pesan)
-        if ($kuantitas_poq < 0) {
-            $kuantitas_poq = 0;
+        // Simpan nilai raw untuk tracking (bisa negatif di database)
+        // Tapi untuk pemesanan, jika negatif berarti stock sudah lebih dari cukup
+        if ($kuantitas_poq_raw < 0) {
+            throw new Exception('Stock saat ini sudah lebih dari cukup. Tidak perlu melakukan pemesanan. Kuantitas POQ: ' . number_format($kuantitas_poq_raw, 2) . ' dus');
         }
         
         // Dibulatkan ke atas (CEIL) ke dus utuh
-        $kuantitas_poq = ceil($kuantitas_poq);
+        $kuantitas_poq = ceil($kuantitas_poq_raw);
         
         if ($interval_hari <= 0) {
             throw new Exception('Gagal menghitung interval POQ');
@@ -1487,9 +1503,38 @@ $active_page = 'stock';
                         $('#poq_lead_time').val((response.lead_time || 0) + ' hari');
                         $('#poq_stock_sekarang').val((response.stock_sekarang || 0).toLocaleString('id-ID') + ' dus');
                         
-                        // Set hasil perhitungan
-                        $('#poq_periode').val((response.interval_hari || 0) + ' hari');
-                        $('#poq_kuantitas').val((response.kuantitas_poq || 0).toLocaleString('id-ID') + ' dus');
+                        // Tampilkan periode POQ: nilai real dan nilai yang sudah di-round up
+                        var intervalRaw = parseFloat(response.interval_hari_raw || response.interval_hari || 0);
+                        var intervalRounded = parseFloat(response.interval_hari || 0);
+                        var intervalRawFormatted = intervalRaw.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        var intervalRoundedFormatted = intervalRounded.toLocaleString('id-ID', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                        
+                        if (intervalRaw != intervalRounded) {
+                            // Jika berbeda, tampilkan kedua nilai
+                            $('#poq_periode').val(intervalRawFormatted + ' hari (real) → ' + intervalRoundedFormatted + ' hari (rounded up)');
+                        } else {
+                            // Jika sama (sudah bulat), tampilkan satu nilai saja
+                            $('#poq_periode').val(intervalRoundedFormatted + ' hari');
+                        }
+                        
+                        // Tampilkan kuantitas POQ: nilai real dan nilai yang sudah di-round up
+                        var kuantitasPoqRaw = parseFloat(response.kuantitas_poq_raw || 0);
+                        var kuantitasPoqRounded = parseFloat(response.kuantitas_poq || 0);
+                        var kuantitasRawFormatted = kuantitasPoqRaw.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        var kuantitasRoundedFormatted = kuantitasPoqRounded.toLocaleString('id-ID', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                        
+                        if (kuantitasPoqRaw < 0) {
+                            $('#poq_kuantitas').val(kuantitasRawFormatted + ' dus (real) → ' + kuantitasRoundedFormatted + ' dus (rounded) - Stock lebih dari cukup');
+                            $('#poq_kuantitas').css('color', '#dc3545'); // Warna merah untuk negatif
+                        } else if (kuantitasPoqRaw != kuantitasPoqRounded) {
+                            // Jika berbeda, tampilkan kedua nilai
+                            $('#poq_kuantitas').val(kuantitasRawFormatted + ' dus (real) → ' + kuantitasRoundedFormatted + ' dus (rounded up)');
+                            $('#poq_kuantitas').css('color', '#000'); // Warna hitam
+                        } else {
+                            // Jika sama (sudah bulat), tampilkan satu nilai saja
+                            $('#poq_kuantitas').val(kuantitasRoundedFormatted + ' dus');
+                            $('#poq_kuantitas').css('color', '#000'); // Warna hitam
+                        }
                         
                         // Reset supplier dropdown
                         $('#poq_supplier').val('');
@@ -1541,6 +1586,28 @@ $active_page = 'stock';
                 });
                 $('#poq_supplier').focus();
                 return;
+            }
+            
+            // Validasi kuantitas POQ tidak boleh negatif
+            // Ambil nilai dari response (yang sudah di-round up)
+            var kuantitasPoqText = $('#poq_kuantitas').val();
+            // Extract nilai rounded (setelah tanda panah jika ada)
+            var kuantitasPoqMatch = kuantitasPoqText.match(/→\s*(\d+[\.,]?\d*)\s*dus/);
+            if (!kuantitasPoqMatch) {
+                // Jika tidak ada tanda panah, ambil nilai pertama
+                kuantitasPoqMatch = kuantitasPoqText.match(/(-?\d+[\.,]?\d*)/);
+            }
+            if (kuantitasPoqMatch) {
+                var kuantitasPoq = parseFloat((kuantitasPoqMatch[1] || kuantitasPoqMatch[0]).replace(',', '.'));
+                if (kuantitasPoq < 0 || kuantitasPoqText.includes('Stock lebih dari cukup')) {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'Tidak Dapat Memesan!',
+                        html: 'Stock saat ini sudah lebih dari cukup.<br>Kuantitas POQ: <strong>' + kuantitasPoqText + '</strong><br><br>Tidak perlu melakukan pemesanan.',
+                        confirmButtonColor: '#667eea'
+                    });
+                    return;
+                }
             }
             
             // Konfirmasi

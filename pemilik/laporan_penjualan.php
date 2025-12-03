@@ -53,8 +53,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_detail_nota'])) {
     $query_nota = "SELECT 
         nj.ID_NOTA_JUAL,
         nj.WAKTU_NOTA,
-        nj.GRAND_TOTAL,
+        nj.TOTAL_JUAL_BARANG,
+        nj.SUB_TOTAL_JUAL,
         nj.PAJAK,
+        nj.GRAND_TOTAL,
+        nj.SUB_TOTAL_BELI,
+        nj.GROSS_PROFIT,
         u.NAMA as NAMA_USER,
         ml.NAMA_LOKASI,
         ml.ALAMAT_LOKASI
@@ -79,6 +83,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_detail_nota'])) {
         dnj.KD_BARANG,
         dnj.JUMLAH_JUAL_BARANG,
         dnj.HARGA_JUAL_BARANG,
+        dnj.TOTAL_JUAL_UANG,
+        dnj.HARGA_BELI_BARANG,
+        dnj.TOTAL_BELI_UANG,
         mb.NAMA_BARANG,
         COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
         COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI
@@ -95,15 +102,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_detail_nota'])) {
     
     $detail_items = [];
     while ($row = $result_detail->fetch_assoc()) {
-        $subtotal = $row['JUMLAH_JUAL_BARANG'] * $row['HARGA_JUAL_BARANG'];
         $detail_items[] = [
             'kd_barang' => $row['KD_BARANG'],
             'nama_barang' => $row['NAMA_BARANG'],
             'nama_merek' => $row['NAMA_MEREK'],
             'nama_kategori' => $row['NAMA_KATEGORI'],
             'jumlah' => intval($row['JUMLAH_JUAL_BARANG']),
-            'harga' => floatval($row['HARGA_JUAL_BARANG']),
-            'subtotal' => $subtotal
+            'harga_jual' => floatval($row['HARGA_JUAL_BARANG']),
+            'total_jual_uang' => floatval($row['TOTAL_JUAL_UANG']),
+            'harga_beli' => floatval($row['HARGA_BELI_BARANG']),
+            'total_beli_uang' => floatval($row['TOTAL_BELI_UANG'])
         ];
     }
     
@@ -121,8 +129,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_detail_nota'])) {
         'nota' => [
             'id_nota_jual' => $nota['ID_NOTA_JUAL'],
             'waktu_nota' => $waktu_formatted,
-            'grand_total' => floatval($nota['GRAND_TOTAL']),
+            'total_jual_barang' => intval($nota['TOTAL_JUAL_BARANG']),
+            'sub_total_jual' => floatval($nota['SUB_TOTAL_JUAL']),
             'pajak' => floatval($nota['PAJAK']),
+            'grand_total' => floatval($nota['GRAND_TOTAL']),
+            'sub_total_beli' => floatval($nota['SUB_TOTAL_BELI']),
+            'gross_profit' => floatval($nota['GROSS_PROFIT']),
             'nama_user' => $nota['NAMA_USER'] ?? '-',
             'nama_lokasi' => $nota['NAMA_LOKASI'],
             'alamat_lokasi' => $nota['ALAMAT_LOKASI']
@@ -141,16 +153,17 @@ $tanggal_sampai = isset($_GET['tanggal_sampai']) ? trim($_GET['tanggal_sampai'])
 $query_penjualan = "SELECT 
     nj.ID_NOTA_JUAL,
     nj.WAKTU_NOTA,
-    nj.GRAND_TOTAL,
+    nj.TOTAL_JUAL_BARANG,
+    nj.SUB_TOTAL_JUAL,
     nj.PAJAK,
-    u.NAMA as NAMA_USER,
-    COALESCE(SUM(dnj.JUMLAH_JUAL_BARANG), 0) as JUMLAH_BARANG_TERJUAL
+    nj.GRAND_TOTAL,
+    nj.SUB_TOTAL_BELI,
+    nj.GROSS_PROFIT,
+    u.NAMA as NAMA_USER
 FROM NOTA_JUAL nj
 LEFT JOIN USERS u ON nj.ID_USERS = u.ID_USERS
-INNER JOIN DETAIL_NOTA_JUAL dnj ON nj.ID_NOTA_JUAL = dnj.ID_NOTA_JUAL
 WHERE nj.KD_LOKASI = ?
 AND DATE(nj.WAKTU_NOTA) BETWEEN ? AND ?
-GROUP BY nj.ID_NOTA_JUAL, nj.WAKTU_NOTA, nj.GRAND_TOTAL, nj.PAJAK, u.NAMA
 ORDER BY nj.WAKTU_NOTA DESC, nj.ID_NOTA_JUAL ASC";
 
 $stmt_penjualan = $conn->prepare($query_penjualan);
@@ -161,12 +174,13 @@ $result_penjualan = $stmt_penjualan->get_result();
 // Query untuk mendapatkan summary
 $query_summary = "SELECT 
     COUNT(DISTINCT nj.ID_NOTA_JUAL) as TOTAL_TRANSAKSI,
-    COALESCE(SUM(dnj.JUMLAH_JUAL_BARANG), 0) as TOTAL_BARANG_TERJUAL,
-    COALESCE(SUM(dnj.JUMLAH_JUAL_BARANG * dnj.HARGA_JUAL_BARANG), 0) as TOTAL_PENJUALAN,
+    COALESCE(SUM(nj.TOTAL_JUAL_BARANG), 0) as TOTAL_BARANG_TERJUAL,
+    COALESCE(SUM(nj.SUB_TOTAL_JUAL), 0) as TOTAL_PENJUALAN,
     COALESCE(SUM(nj.PAJAK), 0) as TOTAL_PAJAK,
-    COALESCE(SUM(nj.GRAND_TOTAL), 0) as TOTAL_GRAND_TOTAL
+    COALESCE(SUM(nj.GRAND_TOTAL), 0) as TOTAL_GRAND_TOTAL,
+    COALESCE(SUM(nj.SUB_TOTAL_BELI), 0) as TOTAL_BELI,
+    COALESCE(SUM(nj.GROSS_PROFIT), 0) as TOTAL_GROSS_PROFIT
 FROM NOTA_JUAL nj
-INNER JOIN DETAIL_NOTA_JUAL dnj ON nj.ID_NOTA_JUAL = dnj.ID_NOTA_JUAL
 WHERE nj.KD_LOKASI = ?
 AND DATE(nj.WAKTU_NOTA) BETWEEN ? AND ?";
 
@@ -252,25 +266,37 @@ $active_page = 'laporan';
 
         <!-- Summary Cards -->
         <div class="row mb-4">
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <div class="stat-card primary">
                     <div class="stat-value"><?php echo number_format($summary['TOTAL_TRANSAKSI'], 0, ',', '.'); ?></div>
                     <div class="stat-label">Total Transaksi</div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <div class="stat-card info">
                     <div class="stat-value"><?php echo number_format($summary['TOTAL_BARANG_TERJUAL'], 0, ',', '.'); ?></div>
                     <div class="stat-label">Total Barang Terjual</div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <div class="stat-card success">
                     <div class="stat-value"><?php echo formatRupiah($summary['TOTAL_PENJUALAN']); ?></div>
-                    <div class="stat-label">Total Penjualan</div>
+                    <div class="stat-label">Sub Total Jual</div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
+                <div class="stat-card danger">
+                    <div class="stat-value"><?php echo formatRupiah($summary['TOTAL_BELI']); ?></div>
+                    <div class="stat-label">Sub Total Beli</div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="stat-card" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white;">
+                    <div class="stat-value"><?php echo formatRupiah($summary['TOTAL_GROSS_PROFIT']); ?></div>
+                    <div class="stat-label">Gross Profit</div>
+                </div>
+            </div>
+            <div class="col-md-2">
                 <div class="stat-card warning">
                     <div class="stat-value"><?php echo formatRupiah($summary['TOTAL_GRAND_TOTAL']); ?></div>
                     <div class="stat-label">Grand Total (Termasuk Pajak)</div>
@@ -287,7 +313,10 @@ $active_page = 'laporan';
                             <th>Tanggal/Waktu</th>
                             <th>ID Nota Jual</th>
                             <th>Kasir</th>
-                            <th>Jumlah Barang Terjual</th>
+                            <th>Jumlah Barang</th>
+                            <th>Sub Total Jual</th>
+                            <th>Sub Total Beli</th>
+                            <th>Gross Profit</th>
                             <th>Pajak</th>
                             <th>Grand Total</th>
                             <th>Action</th>
@@ -300,9 +329,12 @@ $active_page = 'laporan';
                                     <td><?php echo formatWaktu($row['WAKTU_NOTA']); ?></td>
                                     <td><?php echo htmlspecialchars($row['ID_NOTA_JUAL']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_USER'] ?? '-'); ?></td>
-                                    <td><?php echo number_format($row['JUMLAH_BARANG_TERJUAL'], 0, ',', '.'); ?></td>
-                                    <td><?php echo formatRupiah($row['PAJAK']); ?></td>
-                                    <td><?php echo formatRupiah($row['GRAND_TOTAL']); ?></td>
+                                    <td class="text-center"><?php echo number_format($row['TOTAL_JUAL_BARANG'], 0, ',', '.'); ?></td>
+                                    <td class="text-end"><?php echo formatRupiah($row['SUB_TOTAL_JUAL']); ?></td>
+                                    <td class="text-end"><?php echo formatRupiah($row['SUB_TOTAL_BELI']); ?></td>
+                                    <td class="text-end" style="color: #28a745; font-weight: bold;"><?php echo formatRupiah($row['GROSS_PROFIT']); ?></td>
+                                    <td class="text-end"><?php echo formatRupiah($row['PAJAK']); ?></td>
+                                    <td class="text-end" style="font-weight: bold;"><?php echo formatRupiah($row['GRAND_TOTAL']); ?></td>
                                     <td>
                                         <button class="btn-view btn-sm" onclick="lihatNota('<?php echo htmlspecialchars($row['ID_NOTA_JUAL']); ?>')">
                                             Lihat Nota
@@ -312,7 +344,7 @@ $active_page = 'laporan';
                             <?php endwhile; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="7" class="text-center text-muted">Tidak ada data penjualan pada periode yang dipilih</td>
+                                <td colspan="10" class="text-center text-muted">Tidak ada data penjualan pada periode yang dipilih</td>
                             </tr>
                         <?php endif; ?>
                     </tbody>
@@ -369,7 +401,7 @@ $active_page = 'laporan';
                 lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "Semua"]],
                 order: [[0, 'desc']], // Sort by Tanggal descending
                 columnDefs: [
-                    { orderable: false, targets: [6] } // Disable sorting on Action column
+                    { orderable: false, targets: [9] } // Disable sorting on Action column
                 ],
                 scrollX: true,
                 responsive: true,
@@ -413,12 +445,6 @@ $active_page = 'laporan';
                         var nota = response.nota;
                         var items = response.items;
                         
-                        // Calculate subtotal
-                        var subtotal = 0;
-                        items.forEach(function(item) {
-                            subtotal += item.subtotal;
-                        });
-                        
                         // Build HTML nota
                         var html = '<div class="nota-container" style="font-family: Arial, sans-serif;">';
                         html += '<div class="text-center mb-4">';
@@ -450,13 +476,13 @@ $active_page = 'laporan';
                         
                         html += '<hr>';
                         
-                        html += '<table class="table table-bordered mb-3">';
+                        html += '<table class="table table-bordered mb-3" style="font-size: 0.9em;">';
                         html += '<thead class="table-light">';
                         html += '<tr>';
                         html += '<th style="width: 5%;">No</th>';
-                        html += '<th style="width: 35%;">Nama Barang</th>';
+                        html += '<th style="width: 40%;">Nama Barang</th>';
                         html += '<th style="width: 10%;" class="text-center">Jumlah</th>';
-                        html += '<th style="width: 25%;" class="text-end">Harga</th>';
+                        html += '<th style="width: 20%;" class="text-end">Harga</th>';
                         html += '<th style="width: 25%;" class="text-end">Subtotal</th>';
                         html += '</tr>';
                         html += '</thead>';
@@ -467,26 +493,42 @@ $active_page = 'laporan';
                             html += '<td>' + (index + 1) + '</td>';
                             html += '<td>' + escapeHtml(item.nama_barang) + '</td>';
                             html += '<td class="text-center">' + numberFormat(item.jumlah) + '</td>';
-                            html += '<td class="text-end">' + formatRupiah(item.harga) + '</td>';
-                            html += '<td class="text-end">' + formatRupiah(item.subtotal) + '</td>';
+                            html += '<td class="text-end">' + formatRupiah(item.harga_jual) + '</td>';
+                            html += '<td class="text-end">' + formatRupiah(item.total_jual_uang) + '</td>';
                             html += '</tr>';
                         });
                         
                         html += '</tbody>';
                         html += '</table>';
                         
-                        html += '<div class="text-end mb-3">';
+                        html += '<div class="text-end mb-3" style="font-size: 0.95em;">';
                         html += '<div class="row mb-2">';
-                        html += '<div class="col-6 text-start"><strong>Subtotal:</strong></div>';
-                        html += '<div class="col-6 text-end"><strong>' + formatRupiah(subtotal) + '</strong></div>';
+                        html += '<div class="col-6 text-start">Sub Total:</div>';
+                        html += '<div class="col-6 text-end">' + formatRupiah(nota.sub_total_jual) + '</div>';
                         html += '</div>';
                         html += '<div class="row mb-2">';
-                        html += '<div class="col-6 text-start"><strong>Pajak (11%):</strong></div>';
-                        html += '<div class="col-6 text-end"><strong>' + formatRupiah(nota.pajak) + '</strong></div>';
+                        html += '<div class="col-6 text-start">Pajak (11%):</div>';
+                        html += '<div class="col-6 text-end">' + formatRupiah(nota.pajak) + '</div>';
+                        html += '</div>';
+                        html += '<div class="row" style="border-top: 2px solid #000; padding-top: 8px; margin-top: 8px;">';
+                        html += '<div class="col-6 text-start"><strong>Grand Total:</strong></div>';
+                        html += '<div class="col-6 text-end"><strong style="font-size: 1.3em;">' + formatRupiah(nota.grand_total) + '</strong></div>';
+                        html += '</div>';
+                        html += '</div>';
+                        
+                        // Tambahkan informasi internal (untuk admin) di bagian bawah
+                        html += '<hr style="border-top: 1px dashed #ccc; margin: 15px 0;">';
+                        html += '<div class="text-start mb-2" style="font-size: 0.85em; color: #666;">';
+                        html += '<div class="row mb-1">';
+                        html += '<div class="col-6"><strong>Info Internal:</strong></div>';
+                        html += '</div>';
+                        html += '<div class="row mb-1">';
+                        html += '<div class="col-6">Sub Total Beli:</div>';
+                        html += '<div class="col-6 text-end">' + formatRupiah(nota.sub_total_beli) + '</div>';
                         html += '</div>';
                         html += '<div class="row">';
-                        html += '<div class="col-6 text-start"><strong>Grand Total:</strong></div>';
-                        html += '<div class="col-6 text-end"><strong style="font-size: 1.2em;">' + formatRupiah(nota.grand_total) + '</strong></div>';
+                        html += '<div class="col-6">Gross Profit:</div>';
+                        html += '<div class="col-6 text-end" style="color: #28a745; font-weight: bold;">' + formatRupiah(nota.gross_profit) + '</div>';
                         html += '</div>';
                         html += '</div>';
                         

@@ -317,7 +317,37 @@ $active_page = 'laporan';
                 });
                 return;
             }
-            window.location.href = 'kartu_stock.php?kd_lokasi=' + encodeURIComponent(kdLokasi);
+            // Cek apakah gudang atau toko dengan AJAX
+            $.ajax({
+                url: '',
+                method: 'GET',
+                data: { check_lokasi_type: '1', kd_lokasi: kdLokasi },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.success) {
+                        if (response.type_lokasi === 'gudang') {
+                            window.location.href = 'kartu_stock_gudang.php?kd_lokasi=' + encodeURIComponent(kdLokasi);
+                        } else {
+                            window.location.href = 'kartu_stock_toko.php?kd_lokasi=' + encodeURIComponent(kdLokasi);
+                        }
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error!',
+                            text: response.message || 'Gagal mendapatkan informasi lokasi!',
+                            confirmButtonColor: '#e74c3c'
+                        });
+                    }
+                },
+                error: function() {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error!',
+                        text: 'Gagal memuat data lokasi!',
+                        confirmButtonColor: '#e74c3c'
+                    });
+                }
+            });
         }
     </script>
 </body>

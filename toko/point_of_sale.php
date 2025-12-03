@@ -292,32 +292,75 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             throw new Exception('Gagal generate ID nota jual!');
         }
         
-        // Calculate totals
-        $total = 0;
+        // Calculate totals dan hitung SUB_TOTAL_BELI, GROSS_PROFIT
+        $total_jual = 0;
+        $total_beli = 0;
+        $total_jual_barang = 0;
+        
+        // Loop pertama: hitung total dan ambil AVG_HARGA_BELI_PIECES untuk setiap item
+        $items_with_harga_beli = [];
         foreach ($cart_items as $item) {
-            $total += floatval($item['total']);
+            $kd_barang = $item['kd_barang'];
+            $jumlah_jual = intval($item['jumlah']);
+            $harga_jual = floatval($item['harga']);
+            
+            // Ambil AVG_HARGA_BELI_PIECES dari MASTER_BARANG
+            $query_harga_beli = "SELECT AVG_HARGA_BELI_PIECES FROM MASTER_BARANG WHERE KD_BARANG = ?";
+            $stmt_harga_beli = $conn->prepare($query_harga_beli);
+            if (!$stmt_harga_beli) {
+                throw new Exception('Gagal prepare query harga beli: ' . $conn->error);
+            }
+            $stmt_harga_beli->bind_param("s", $kd_barang);
+            $stmt_harga_beli->execute();
+            $result_harga_beli = $stmt_harga_beli->get_result();
+            
+            if ($result_harga_beli->num_rows == 0) {
+                throw new Exception('Barang tidak ditemukan: ' . $kd_barang);
+            }
+            
+            $harga_beli_data = $result_harga_beli->fetch_assoc();
+            $harga_beli = floatval($harga_beli_data['AVG_HARGA_BELI_PIECES'] ?? 0);
+            
+            // Hitung total
+            $total_jual += floatval($item['total']);
+            $total_beli += $harga_beli * $jumlah_jual;
+            $total_jual_barang += $jumlah_jual;
+            
+            // Simpan data untuk digunakan di loop berikutnya
+            $items_with_harga_beli[] = [
+                'kd_barang' => $kd_barang,
+                'jumlah_jual' => $jumlah_jual,
+                'harga_jual' => $harga_jual,
+                'harga_beli' => $harga_beli,
+                'total_jual_uang' => $harga_jual * $jumlah_jual,
+                'total_beli_uang' => $harga_beli * $jumlah_jual
+            ];
         }
         
-        $ppn = $total * 0.11; // PPN 11%
-        $grand_total = $total + $ppn;
+        $ppn = $total_jual * 0.11; // PPN 11%
+        $grand_total = $total_jual + $ppn;
+        $gross_profit = $total_jual - $total_beli;
         
-        // Insert NOTA_JUAL
-        $insert_nota = "INSERT INTO NOTA_JUAL (ID_NOTA_JUAL, ID_USERS, KD_LOKASI, GRAND_TOTAL, PAJAK) VALUES (?, ?, ?, ?, ?)";
+        // Insert NOTA_JUAL dengan kolom baru
+        $insert_nota = "INSERT INTO NOTA_JUAL (ID_NOTA_JUAL, ID_USERS, KD_LOKASI, TOTAL_JUAL_BARANG, SUB_TOTAL_JUAL, PAJAK, GRAND_TOTAL, SUB_TOTAL_BELI, GROSS_PROFIT) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt_nota = $conn->prepare($insert_nota);
         if (!$stmt_nota) {
             throw new Exception('Gagal prepare query nota: ' . $conn->error);
         }
-        $stmt_nota->bind_param("sssdd", $id_nota_jual, $user_id, $kd_lokasi, $grand_total, $ppn);
+        $stmt_nota->bind_param("sssiddddd", $id_nota_jual, $user_id, $kd_lokasi, $total_jual_barang, $total_jual, $ppn, $grand_total, $total_beli, $gross_profit);
         
         if (!$stmt_nota->execute()) {
             throw new Exception('Gagal insert nota jual: ' . $stmt_nota->error);
         }
         
         // Insert DETAIL_NOTA_JUAL dan update STOCK untuk setiap item
-        foreach ($cart_items as $item) {
+        foreach ($items_with_harga_beli as $item) {
             $kd_barang = $item['kd_barang'];
-            $jumlah_jual = intval($item['jumlah']);
-            $harga_jual = floatval($item['harga']);
+            $jumlah_jual = $item['jumlah_jual'];
+            $harga_jual = $item['harga_jual'];
+            $harga_beli = $item['harga_beli'];
+            $total_jual_uang = $item['total_jual_uang'];
+            $total_beli_uang = $item['total_beli_uang'];
             
             // Generate ID_DNJB dengan format DNJB+UUID (total 16 karakter: DNJB=4, UUID=12)
             $id_dnjb = '';
@@ -335,13 +378,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 throw new Exception('Gagal generate ID detail nota jual!');
             }
             
-            // Insert DETAIL_NOTA_JUAL
-            $insert_detail = "INSERT INTO DETAIL_NOTA_JUAL (ID_DNJB, KD_BARANG, ID_NOTA_JUAL, JUMLAH_JUAL_BARANG, HARGA_JUAL_BARANG) VALUES (?, ?, ?, ?, ?)";
+            // Insert DETAIL_NOTA_JUAL dengan kolom baru
+            $insert_detail = "INSERT INTO DETAIL_NOTA_JUAL (ID_DNJB, KD_BARANG, ID_NOTA_JUAL, JUMLAH_JUAL_BARANG, HARGA_JUAL_BARANG, TOTAL_JUAL_UANG, HARGA_BELI_BARANG, TOTAL_BELI_UANG) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
             $stmt_detail = $conn->prepare($insert_detail);
             if (!$stmt_detail) {
                 throw new Exception('Gagal prepare query detail: ' . $conn->error);
             }
-            $stmt_detail->bind_param("sssid", $id_dnjb, $kd_barang, $id_nota_jual, $jumlah_jual, $harga_jual);
+            $stmt_detail->bind_param("sssidddd", $id_dnjb, $kd_barang, $id_nota_jual, $jumlah_jual, $harga_jual, $total_jual_uang, $harga_beli, $total_beli_uang);
             
             if (!$stmt_detail->execute()) {
                 throw new Exception('Gagal insert detail nota jual: ' . $stmt_detail->error);
@@ -1042,9 +1085,16 @@ $active_page = 'point_of_sale';
                                     title: 'Berhasil!',
                                     html: 'Pembayaran berhasil diproses!<br><br>ID Nota: <strong>' + response.id_nota_jual + '</strong><br>Grand Total: <strong>Rp ' + formatNumber(response.grand_total) + '</strong>',
                                     confirmButtonColor: '#667eea',
-                                    timer: 3000,
+                                    showCancelButton: true,
+                                    confirmButtonText: 'Cetak Nota',
+                                    cancelButtonText: 'Tutup',
+                                    timer: 5000,
                                     timerProgressBar: true
-                                }).then(() => {
+                                }).then((result) => {
+                                    if (result.isConfirmed) {
+                                        // Buka halaman cetak nota
+                                        window.open('cetak_nota.php?id_nota_jual=' + response.id_nota_jual, '_blank');
+                                    }
                                     // Clear cart and reload
                                     cart = [];
                                     updateCartDisplay();

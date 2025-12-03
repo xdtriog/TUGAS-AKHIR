@@ -51,6 +51,9 @@
          ID_NOTA_JUAL                 VARCHAR(16),
          JUMLAH_JUAL_BARANG           INT,
          HARGA_JUAL_BARANG            DECIMAL(20,2),
+         TOTAL_JUAL_UANG              DECIMAL(20,2),
+         HARGA_BELI_BARANG            DECIMAL(20,2),
+         TOTAL_BELI_UANG              DECIMAL(20,2),
          PRIMARY KEY (ID_DNJB)
       );
 
@@ -171,8 +174,12 @@
          ID_USERS               VARCHAR(8),
          KD_LOKASI              VARCHAR(8),
          WAKTU_NOTA             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-         GRAND_TOTAL            DECIMAL(20,2),
+         TOTAL_JUAL_BARANG      INT,
+         SUB_TOTAL_JUAL         DECIMAL(20,2),
          PAJAK                  DECIMAL(20,2),
+         GRAND_TOTAL            DECIMAL(20,2),
+         SUB_TOTAL_BELI         DECIMAL(20,2),
+         GROSS_PROFIT           DECIMAL(20,2),
          PRIMARY KEY (ID_NOTA_JUAL)
       );
 

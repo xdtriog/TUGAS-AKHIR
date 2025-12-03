@@ -17,7 +17,7 @@ if (empty($kd_lokasi)) {
     exit();
 }
 
-// Validasi lokasi
+// Validasi lokasi dan pastikan adalah toko
 $query_lokasi = "SELECT KD_LOKASI, NAMA_LOKASI, ALAMAT_LOKASI, TYPE_LOKASI 
                  FROM MASTER_LOKASI 
                  WHERE KD_LOKASI = ? AND STATUS = 'AKTIF'";
@@ -32,6 +32,12 @@ if ($result_lokasi->num_rows == 0) {
 }
 
 $lokasi = $result_lokasi->fetch_assoc();
+
+// Validasi bahwa lokasi adalah toko
+if ($lokasi['TYPE_LOKASI'] != 'toko') {
+    header("Location: laporan.php");
+    exit();
+}
 
 // Get filter tanggal (default: bulan ini)
 $tanggal_dari = isset($_GET['tanggal_dari']) ? trim($_GET['tanggal_dari']) : date('Y-m-01');
@@ -114,6 +120,8 @@ if (!empty($kd_barang)) {
         }
         
         // Query untuk mendapatkan stock history dalam periode
+        // Gunakan >= dan < untuk memastikan semua history dalam periode terambil termasuk yang di akhir hari
+        $tanggal_sampai_end = date('Y-m-d', strtotime($tanggal_sampai . ' +1 day'));
         $query_history = "SELECT 
             sh.ID_HISTORY_STOCK,
             sh.WAKTU_CHANGE,
@@ -127,11 +135,12 @@ if (!empty($kd_barang)) {
         FROM STOCK_HISTORY sh
         LEFT JOIN USERS u ON sh.UPDATED_BY = u.ID_USERS
         WHERE sh.KD_BARANG = ? AND sh.KD_LOKASI = ?
-        AND DATE(sh.WAKTU_CHANGE) BETWEEN ? AND ?
+        AND sh.WAKTU_CHANGE >= ? AND sh.WAKTU_CHANGE < ?
         ORDER BY sh.WAKTU_CHANGE ASC, sh.ID_HISTORY_STOCK ASC";
         
         $stmt_history = $conn->prepare($query_history);
-        $stmt_history->bind_param("ssss", $kd_barang, $kd_lokasi, $tanggal_dari, $tanggal_sampai);
+        $tanggal_dari_datetime = $tanggal_dari . ' 00:00:00';
+        $stmt_history->bind_param("ssss", $kd_barang, $kd_lokasi, $tanggal_dari_datetime, $tanggal_sampai_end);
         $stmt_history->execute();
         $result_history = $stmt_history->get_result();
         
@@ -179,7 +188,7 @@ $active_page = 'laporan';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pemilik - Kartu Stock</title>
+    <title>Pemilik - Kartu Stock Toko</title>
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- DataTables CSS -->
@@ -194,7 +203,7 @@ $active_page = 'laporan';
     <div class="main-content">
         <!-- Page Header -->
         <div class="page-header">
-            <h1 class="page-title">Pemilik - Kartu Stock</h1>
+            <h1 class="page-title">Pemilik - Kartu Stock Toko</h1>
             <p class="text-muted mb-0"><?php echo htmlspecialchars($lokasi['NAMA_LOKASI']); ?> - <?php echo htmlspecialchars($lokasi['ALAMAT_LOKASI']); ?></p>
         </div>
 
@@ -208,7 +217,10 @@ $active_page = 'laporan';
                         <label class="form-label fw-bold">Pilih Barang</label>
                         <select class="form-select" name="kd_barang" id="selectBarang" required>
                             <option value="">-- Pilih Barang --</option>
-                            <?php if ($result_barang && $result_barang->num_rows > 0): ?>
+                            <?php 
+                            // Reset result pointer
+                            $result_barang->data_seek(0);
+                            if ($result_barang && $result_barang->num_rows > 0): ?>
                                 <?php while ($row = $result_barang->fetch_assoc()): ?>
                                     <option value="<?php echo htmlspecialchars($row['KD_BARANG']); ?>" 
                                             <?php echo ($kd_barang == $row['KD_BARANG']) ? 'selected' : ''; ?>>
@@ -230,7 +242,7 @@ $active_page = 'laporan';
                     <div class="col-md-3 d-flex align-items-end gap-2">
                         <button type="submit" class="btn btn-primary">Tampilkan</button>
                         <?php if (!empty($kd_barang)): ?>
-                            <a href="download_kartu_stock.php?kd_lokasi=<?php echo urlencode($kd_lokasi); ?>&kd_barang=<?php echo urlencode($kd_barang); ?>&tanggal_dari=<?php echo urlencode($tanggal_dari); ?>&tanggal_sampai=<?php echo urlencode($tanggal_sampai); ?>" 
+                            <a href="download_kartu_stock_toko.php?kd_lokasi=<?php echo urlencode($kd_lokasi); ?>&kd_barang=<?php echo urlencode($kd_barang); ?>&tanggal_dari=<?php echo urlencode($tanggal_dari); ?>&tanggal_sampai=<?php echo urlencode($tanggal_sampai); ?>" 
                                class="btn btn-success" target="_blank">Download</a>
                         <?php endif; ?>
                         <a href="laporan.php" class="btn btn-secondary">Kembali</a>
@@ -313,10 +325,35 @@ $active_page = 'laporan';
                     <div class="stat-card info">
                         <div class="stat-value">
                             <?php 
+                            // Stock akhir periode = stock awal + (jumlah perubahan dari semua history dalam periode)
                             $stock_akhir_periode = $stock_awal;
                             foreach ($stock_history as $h) {
-                                $stock_akhir_periode = $h['JUMLAH_AKHIR'];
+                                $stock_akhir_periode += $h['JUMLAH_PERUBAHAN'];
                             }
+                            
+                            // Jika periode sampai hari ini atau masa depan, cek apakah ada history setelah tanggal_sampai
+                            $tanggal_sampai_date = new DateTime($tanggal_sampai);
+                            $hari_ini = new DateTime();
+                            $hari_ini->setTime(0, 0, 0); // Set ke awal hari untuk perbandingan yang akurat
+                            
+                            if ($tanggal_sampai_date >= $hari_ini) {
+                                // Periode sampai hari ini atau masa depan, cek apakah ada history setelah tanggal_sampai
+                                $query_check_after = "SELECT COUNT(*) as TOTAL 
+                                                    FROM STOCK_HISTORY 
+                                                    WHERE KD_BARANG = ? AND KD_LOKASI = ? 
+                                                    AND DATE(WAKTU_CHANGE) > ?";
+                                $stmt_check_after = $conn->prepare($query_check_after);
+                                $stmt_check_after->bind_param("sss", $kd_barang, $kd_lokasi, $tanggal_sampai);
+                                $stmt_check_after->execute();
+                                $result_check_after = $stmt_check_after->get_result();
+                                $has_history_after = intval($result_check_after->fetch_assoc()['TOTAL']) > 0;
+                                
+                                if (!$has_history_after) {
+                                    // Tidak ada history setelah tanggal_sampai, gunakan stock saat ini
+                                    $stock_akhir_periode = intval($barang_selected['STOCK_SEKARANG']);
+                                }
+                            }
+                            
                             echo number_format($stock_akhir_periode, 0, ',', '.');
                             ?>
                         </div>
@@ -344,7 +381,6 @@ $active_page = 'laporan';
                         </thead>
                         <tbody>
                             <?php 
-                            $saldo_berjalan = $stock_awal;
                             if (count($stock_history) > 0): 
                             ?>
                                 <?php foreach ($stock_history as $h): ?>
