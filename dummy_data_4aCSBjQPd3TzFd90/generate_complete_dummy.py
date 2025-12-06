@@ -12,19 +12,22 @@ Script lengkap untuk generate data dummy: PESAN_BARANG > TRANSFER (FEFO) > PENJU
 import csv
 from datetime import datetime, timedelta
 import random
+import string
+import uuid
+import time
 
 # Konstanta
 KD_BARANG = '4aCSBjQPd3TzFd90'
-KD_LOKASI_GUDANG = 'NRb2W8VG'
-KD_LOKASI_TOKO = 'NsHmYgfe'
+KD_LOKASI_GUDANG = 'GDNGj825'  # Format: GDNG+UUID (8 karakter: GDNG=4, UUID=4)
+KD_LOKASI_TOKO = 'TOKOeLig'    # Format: TOKO+UUID (8 karakter: TOKO=4, UUID=4)
 USER_GUDANG = 'GDNGj825'
 USER_TOKO = 'TOKOeLig'
 KD_SUPPLIER_1 = 'NGP9zHgE'
 KD_SUPPLIER_2 = 'NKnVD9E9'
 SATUAN_PERDUS = 25  # 25 pieces per dus (sesuai dengan MASTER_BARANG untuk 4aCSBjQPd3TzFd90)
-HARGA_PESAN_DUS = 125000  # Harga beli per dus
+HARGA_PESAN_DUS = 400000  # Harga beli per dus (lebih mahal dari W8r1LuGwd932W3Zq)
 BIAYA_PENGIRIMAN = 50000  # Biaya pengiriman
-HARGA_JUAL_PIECE = 15000  # Harga jual per piece
+HARGA_JUAL_PIECE = 40000  # Harga jual per piece (lebih mahal dari W8r1LuGwd932W3Zq)
 MIN_STOCK_TOKO = 100  # Minimal stock toko dalam PIECES (trigger untuk resupply)
 MAX_STOCK_TOKO = 1000  # Maksimal stock toko dalam PIECES (target setelah resupply)
 MIN_STOCK_GUDANG = 50  # Minimal stock gudang dalam DUS (trigger untuk pemesanan)
@@ -61,51 +64,93 @@ batch_expired = {}  # {id_pesan: tgl_expired}
 purchase_history = []  # List of (harga_dus, total_masuk_dus) untuk menghitung weighted average
 
 def generate_id_pesan(tanggal):
-    """Generate ID pesan barang"""
+    """Generate ID pesan barang dengan format PSBG+UUID (total 16 karakter: PSBG=4, UUID=12)"""
     global pesan_counter
-    id_pesan = f'PB{tanggal.strftime("%Y%m%d")}{pesan_counter:03d}'
+    # Gunakan UUID4 + timestamp untuk memastikan keunikan
+    uuid_hex = uuid.uuid4().hex.upper()[:12]
+    # Tambahkan timestamp microsecond untuk memastikan tidak ada duplikasi
+    timestamp_part = str(int(time.time() * 1000000) % 1000000).zfill(6)
+    # Kombinasi UUID + timestamp, ambil 12 karakter
+    uuid_part = (uuid_hex + timestamp_part)[:12]
+    id_pesan = f'PSBG{uuid_part}'
     pesan_counter += 1
     return id_pesan
 
 def generate_id_transfer(tanggal):
-    """Generate ID transfer"""
+    """Generate ID transfer dengan format TRFR+UUID (total 16 karakter: TRFR=4, UUID=12)"""
     global transfer_counter
-    id_transfer = f'TRF{tanggal.strftime("%Y%m%d")}{transfer_counter:03d}'
+    # Gunakan UUID4 + timestamp untuk memastikan keunikan
+    uuid_hex = uuid.uuid4().hex.upper()[:12]
+    # Tambahkan timestamp microsecond untuk memastikan tidak ada duplikasi
+    timestamp_part = str(int(time.time() * 1000000) % 1000000).zfill(6)
+    # Kombinasi UUID + timestamp, ambil 12 karakter
+    uuid_part = (uuid_hex + timestamp_part)[:12]
+    id_transfer = f'TRFR{uuid_part}'
     transfer_counter += 1
     return id_transfer
 
 def generate_id_detail(tanggal):
-    """Generate ID detail transfer"""
+    """Generate ID detail transfer dengan format DTFR+UUID (total 16 karakter: DTFR=4, UUID=12)"""
     global detail_counter
-    id_detail = f'DTL{tanggal.strftime("%Y%m%d")}{detail_counter:03d}'
+    # Gunakan UUID4 + timestamp untuk memastikan keunikan
+    uuid_hex = uuid.uuid4().hex.upper()[:12]
+    # Tambahkan timestamp microsecond untuk memastikan tidak ada duplikasi
+    timestamp_part = str(int(time.time() * 1000000) % 1000000).zfill(6)
+    # Kombinasi UUID + timestamp, ambil 12 karakter
+    uuid_part = (uuid_hex + timestamp_part)[:12]
+    id_detail = f'DTFR{uuid_part}'
     detail_counter += 1
     return id_detail
 
 def generate_id_batch(tanggal):
-    """Generate ID batch"""
+    """Generate ID batch dengan format DTFB+UUID (total 16 karakter: DTFB=4, UUID=12)"""
     global batch_counter
-    id_batch = f'BTCH{tanggal.strftime("%Y%m%d")}{batch_counter:03d}'
+    # Gunakan UUID4 + timestamp untuk memastikan keunikan
+    uuid_hex = uuid.uuid4().hex.upper()[:12]
+    # Tambahkan timestamp microsecond untuk memastikan tidak ada duplikasi
+    timestamp_part = str(int(time.time() * 1000000) % 1000000).zfill(6)
+    # Kombinasi UUID + timestamp, ambil 12 karakter
+    uuid_part = (uuid_hex + timestamp_part)[:12]
+    id_batch = f'DTFB{uuid_part}'
     batch_counter += 1
     return id_batch
 
 def generate_id_nota():
-    """Generate ID nota"""
+    """Generate ID nota dengan format NOTA+UUID (total 16 karakter: NOTA=4, UUID=12)"""
     global nota_counter
-    id_nota = f'NOTA{nota_counter:06d}'
+    # Gunakan UUID4 + timestamp untuk memastikan keunikan
+    uuid_hex = uuid.uuid4().hex.upper()[:12]
+    # Tambahkan timestamp microsecond untuk memastikan tidak ada duplikasi
+    timestamp_part = str(int(time.time() * 1000000) % 1000000).zfill(6)
+    # Kombinasi UUID + timestamp, ambil 12 karakter
+    uuid_part = (uuid_hex + timestamp_part)[:12]
+    id_nota = f'NOTA{uuid_part}'
     nota_counter += 1
     return id_nota
 
 def generate_id_detail_nota():
-    """Generate ID detail nota"""
+    """Generate ID detail nota dengan format DNJB+UUID (total 16 karakter: DNJB=4, UUID=12)"""
     global detail_nota_counter
-    id_detail = f'DNJB{detail_nota_counter:06d}'
+    # Gunakan UUID4 + timestamp untuk memastikan keunikan
+    uuid_hex = uuid.uuid4().hex.upper()[:12]
+    # Tambahkan timestamp microsecond untuk memastikan tidak ada duplikasi
+    timestamp_part = str(int(time.time() * 1000000) % 1000000).zfill(6)
+    # Kombinasi UUID + timestamp, ambil 12 karakter
+    uuid_part = (uuid_hex + timestamp_part)[:12]
+    id_detail = f'DNJB{uuid_part}'
     detail_nota_counter += 1
     return id_detail
 
 def generate_id_history(tanggal):
-    """Generate ID stock history"""
+    """Generate ID stock history dengan format SKHY+UUID (total 16 karakter: SKHY=4, UUID=12)"""
     global history_counter
-    id_history = f'SH{tanggal.strftime("%Y%m%d%H%M")}{history_counter % 100:02d}'
+    # Gunakan UUID4 + timestamp untuk memastikan keunikan
+    uuid_hex = uuid.uuid4().hex.upper()[:12]
+    # Tambahkan timestamp microsecond untuk memastikan tidak ada duplikasi
+    timestamp_part = str(int(time.time() * 1000000) % 1000000).zfill(6)
+    # Kombinasi UUID + timestamp, ambil 12 karakter
+    uuid_part = (uuid_hex + timestamp_part)[:12]
+    id_history = f'SKHY{uuid_part}'
     history_counter += 1
     return id_history
 
@@ -138,8 +183,8 @@ def pesan_barang_baru(tanggal, jumlah_pesan=None):
     if jumlah_pesan is None:
         jumlah_pesan = random.randint(50, 100)
     
-    # Harga pesan: bisa bervariasi sedikit (120000-130000 per dus)
-    harga_pesan_dus = random.randint(120000, 130000)
+    # Harga pesan: bisa bervariasi sedikit (390000-410000 per dus)
+    harga_pesan_dus = random.randint(390000, 410000)
     
     # Tanggal expired: minimal minggu depan sampai maksimal 2027
     min_expired = tanggal + timedelta(days=7)

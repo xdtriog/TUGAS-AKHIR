@@ -275,13 +275,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     $conn->begin_transaction();
     
     try {
-        // Generate ID_NOTA_JUAL dengan format NTJB+UUID (total 16 karakter: NTJB=4, UUID=12)
+        // Generate ID_NOTA_JUAL dengan format NOTA+UUID (total 16 karakter: NOTA=4, UUID=12)
         $id_nota_jual = '';
         $maxAttempts = 100;
         $attempt = 0;
         do {
             $uuid = ShortIdGenerator::generate(12, '');
-            $id_nota_jual = 'NTJB' . $uuid;
+            $id_nota_jual = 'NOTA' . $uuid;
             $attempt++;
             if (!checkUUIDExists($conn, 'NOTA_JUAL', 'ID_NOTA_JUAL', $id_nota_jual)) {
                 break;
@@ -409,7 +409,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             // REF mengacu ke ID_DNJB (detail nota jual) karena per barang
             $id_history = '';
             do {
-                $id_history = ShortIdGenerator::generate(16, '');
+                // Generate ID_HISTORY_STOCK dengan format SKHY+UUID (total 16 karakter: SKHY=4, UUID=12)
+                $uuid = ShortIdGenerator::generate(12, '');
+                $id_history = 'SKHY' . $uuid;
             } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
             
             $jumlah_perubahan = -$jumlah_jual; // Negative karena mengurangi stock

@@ -111,30 +111,22 @@ function formatRupiah($angka) {
     return "Rp. " . number_format($angka, 0, ',', '.');
 }
 
-// Format tanggal
+// Format tanggal (dd/mm/yyyy)
 function formatTanggal($tanggal) {
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
+    if (empty($tanggal) || $tanggal == null) {
+        return '-';
+    }
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    return $date->format('d/m/Y');
 }
 
-// Format waktu
+// Format waktu (dd/mm/yyyy HH:ii WIB)
 function formatWaktu($waktu) {
     if (empty($waktu) || $waktu == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($waktu);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y') . ' ' . $date->format('H:i') . ' WIB';
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Set active page untuk sidebar
@@ -221,7 +213,7 @@ $active_page = 'laporan';
                                         <td class="text-end"><?php echo formatRupiah($row['SETUP_COST']); ?></td>
                                         <td class="text-end"><?php echo formatRupiah($row['HOLDING_COST']); ?></td>
                                         <td class="text-center"><strong><?php echo number_format($row['INTERVAL_HARI'], 0, ',', '.'); ?></strong></td>
-                                        <td><?php echo formatWaktu($row['WAKTU_PERHITUNGAN_INTERVAL_POQ']); ?></td>
+                                        <td data-order="<?php echo strtotime($row['WAKTU_PERHITUNGAN_INTERVAL_POQ']); ?>"><?php echo formatWaktu($row['WAKTU_PERHITUNGAN_INTERVAL_POQ']); ?></td>
                                     </tr>
                                 <?php endwhile; ?>
                             <?php else: ?>
@@ -273,7 +265,7 @@ $active_page = 'laporan';
                                         <td class="text-center"><?php echo number_format($row['STOCK_SEKARANG'], 0, ',', '.'); ?></td>
                                         <td class="text-center"><?php echo number_format($row['STOCK_SAAT_INI'] ?? 0, 0, ',', '.'); ?></td>
                                         <td class="text-center"><strong><?php echo number_format($row['KUANTITAS_POQ'], 0, ',', '.'); ?></strong></td>
-                                        <td><?php echo formatWaktu($row['WAKTU_PERHITUNGAN_KUANTITAS_POQ']); ?></td>
+                                        <td data-order="<?php echo strtotime($row['WAKTU_PERHITUNGAN_KUANTITAS_POQ']); ?>"><?php echo formatWaktu($row['WAKTU_PERHITUNGAN_KUANTITAS_POQ']); ?></td>
                                         <td><?php echo formatTanggal($row['JATUH_TEMPO_POQ']); ?></td>
                                     </tr>
                                 <?php endwhile; ?>

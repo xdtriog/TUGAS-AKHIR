@@ -43,59 +43,13 @@ $stmt_alamat->execute();
 $result_alamat = $stmt_alamat->get_result();
 $alamat_lokasi = $result_alamat->num_rows > 0 ? $result_alamat->fetch_assoc()['ALAMAT_LOKASI'] : '';
 
-// Handle AJAX request untuk get data barang
-if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
-    header('Content-Type: application/json');
-    
-    $kd_barang = isset($_GET['kd_barang']) ? trim($_GET['kd_barang']) : '';
-    
-    if (empty($kd_barang)) {
-        echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
-        exit();
-    }
-    
-    $query_barang = "SELECT mb.SATUAN_PERDUS, mb.BERAT, mb.AVG_HARGA_BELI_PIECES
-                    FROM MASTER_BARANG mb
-                    WHERE mb.KD_BARANG = ?";
-    $stmt_barang = $conn->prepare($query_barang);
-    if (!$stmt_barang) {
-        echo json_encode(['success' => false, 'message' => 'Gagal prepare query: ' . $conn->error]);
-        exit();
-    }
-    $stmt_barang->bind_param("s", $kd_barang);
-    if (!$stmt_barang->execute()) {
-        echo json_encode(['success' => false, 'message' => 'Gagal execute query: ' . $stmt_barang->error]);
-        exit();
-    }
-    $result_barang = $stmt_barang->get_result();
-    
-    if ($result_barang->num_rows == 0) {
-        echo json_encode(['success' => false, 'message' => 'Data barang tidak ditemukan!']);
-        exit();
-    }
-    
-    $barang_data = $result_barang->fetch_assoc();
-    
-    echo json_encode([
-        'success' => true,
-        'data' => [
-            'satuan_perdus' => intval($barang_data['SATUAN_PERDUS'] ?? 1),
-            'berat' => intval($barang_data['BERAT'] ?? 0),
-            'avg_harga_beli' => floatval($barang_data['AVG_HARGA_BELI_PIECES'] ?? 0)
-        ]
-    ]);
-    exit();
-}
-
-// Handle AJAX request untuk simpan stock opname
+// Handle AJAX request untuk simpan stock opname (multiple barang)
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['action'] == 'simpan_opname') {
     header('Content-Type: application/json');
     
-    $kd_barang = isset($_POST['kd_barang']) ? trim($_POST['kd_barang']) : '';
-    $jumlah_sebenarnya_pieces = isset($_POST['jumlah_sebenarnya']) ? intval($_POST['jumlah_sebenarnya']) : 0;
-    $satuan = 'PIECES'; // Stock toko selalu PIECES
+    $barang_data = isset($_POST['barang']) ? $_POST['barang'] : [];
     
-    if (empty($kd_barang) || $jumlah_sebenarnya_pieces < 0) {
+    if (!is_array($barang_data) || count($barang_data) == 0) {
         echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
         exit();
     }
@@ -106,135 +60,189 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     try {
         require_once '../includes/uuid_generator.php';
         
-        // Get data stock dan master barang
-        $query_barang = "SELECT 
-            s.JUMLAH_BARANG as JUMLAH_SISTEM,
-            s.SATUAN as SATUAN_STOCK,
-            mb.SATUAN_PERDUS,
-            mb.AVG_HARGA_BELI_PIECES
-        FROM STOCK s
-        INNER JOIN MASTER_BARANG mb ON s.KD_BARANG = mb.KD_BARANG
-        WHERE s.KD_BARANG = ? AND s.KD_LOKASI = ?";
-        $stmt_barang = $conn->prepare($query_barang);
-        if (!$stmt_barang) {
-            throw new Exception('Gagal prepare query barang: ' . $conn->error);
-        }
-        $stmt_barang->bind_param("ss", $kd_barang, $kd_lokasi);
-        if (!$stmt_barang->execute()) {
-            throw new Exception('Gagal execute query barang: ' . $conn->error);
-        }
-        $result_barang = $stmt_barang->get_result();
+        $opname_results = [];
+        $total_selisih_pieces = 0;
+        $total_uang = 0;
         
-        if ($result_barang->num_rows == 0) {
-            throw new Exception('Data barang tidak ditemukan!');
-        }
-        
-        $barang_data = $result_barang->fetch_assoc();
-        $jumlah_sistem = intval($barang_data['JUMLAH_SISTEM'] ?? 0);
-        $satuan_stock = $barang_data['SATUAN_STOCK'] ?? 'PIECES';
-        $satuan_perdus = intval($barang_data['SATUAN_PERDUS'] ?? 1);
-        $avg_harga_beli = floatval($barang_data['AVG_HARGA_BELI_PIECES'] ?? 0);
-        
-        // Stock toko selalu PIECES, jadi:
-        // JUMLAH_SISTEM: dari STOCK, dalam PIECES
-        $jumlah_sistem_pieces = $jumlah_sistem;
-        
-        // JUMLAH_SEBENARNYA: dalam PIECES (dari form input)
-        // Sudah dalam PIECES dari form input
-        
-        // SELISIH: dalam PIECES
-        $selisih_pieces = $jumlah_sebenarnya_pieces - $jumlah_sistem_pieces;
-        
-        // TOTAL_BARANG_PIECES: selisih dalam pieces (bisa negatif)
-        $total_barang_pieces = $selisih_pieces;
-        
-        // HARGA_BARANG_PIECES: diambil dari MASTER_BARANG.AVG_HARGA_BELI_PIECES (per piece)
-        $harga_barang_pieces = $avg_harga_beli;
-        
-        // TOTAL_UANG: TOTAL_BARANG_PIECES * HARGA_BARANG_PIECES (bisa negatif jika selisih negatif)
-        $total_uang = $total_barang_pieces * $harga_barang_pieces;
-        
-        // Generate ID opname
-        $id_opname = '';
-        do {
-            $id_opname = ShortIdGenerator::generate(16, '');
-        } while (checkUUIDExists($conn, 'STOCK_OPNAME', 'ID_OPNAME', $id_opname));
-        
-        // Insert ke STOCK_OPNAME
-        // Untuk toko: JUMLAH_SISTEM, JUMLAH_SEBENARNYA, SELISIH dalam PIECES
-        // SATUAN = 'PIECES'
-        $insert_opname = "INSERT INTO STOCK_OPNAME 
-                        (ID_OPNAME, KD_BARANG, KD_LOKASI, ID_USERS, JUMLAH_SEBENARNYA, JUMLAH_SISTEM, SELISIH, SATUAN, SATUAN_PERDUS, TOTAL_BARANG_PIECES, HARGA_BARANG_PIECES, TOTAL_UANG)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        $stmt_opname = $conn->prepare($insert_opname);
-        if (!$stmt_opname) {
-            throw new Exception('Gagal prepare query opname: ' . $conn->error);
-        }
-        
-        // Untuk STOCK_OPNAME toko:
-        // JUMLAH_SISTEM: dari STOCK, dalam PIECES
-        // JUMLAH_SEBENARNYA: dalam PIECES
-        // SATUAN: 'PIECES'
-        // SELISIH: dalam PIECES
-        // SATUAN_PERDUS: dari MASTER_BARANG
-        // TOTAL_BARANG_PIECES: selisih dalam pieces (bisa negatif)
-        // HARGA_BARANG_PIECES: dari MASTER_BARANG.AVG_HARGA_BELI_PIECES
-        // TOTAL_UANG: TOTAL_BARANG_PIECES * HARGA_BARANG_PIECES
-        $stmt_opname->bind_param("ssssiiisiiid", $id_opname, $kd_barang, $kd_lokasi, $user_id, $jumlah_sebenarnya_pieces, $jumlah_sistem_pieces, $selisih_pieces, $satuan_stock, $satuan_perdus, $total_barang_pieces, $harga_barang_pieces, $total_uang);
-        if (!$stmt_opname->execute()) {
-            throw new Exception('Gagal insert opname: ' . $stmt_opname->error);
-        }
-        
-        // Update STOCK dengan jumlah sebenarnya (dalam PIECES)
-        $update_stock = "UPDATE STOCK 
-                        SET JUMLAH_BARANG = ?, 
-                            LAST_UPDATED = CURRENT_TIMESTAMP,
-                            UPDATED_BY = ?
-                        WHERE KD_BARANG = ? AND KD_LOKASI = ?";
-        $stmt_update_stock = $conn->prepare($update_stock);
-        if (!$stmt_update_stock) {
-            throw new Exception('Gagal prepare query update stock: ' . $conn->error);
-        }
-        $stmt_update_stock->bind_param("isss", $jumlah_sebenarnya_pieces, $user_id, $kd_barang, $kd_lokasi);
-        if (!$stmt_update_stock->execute()) {
-            throw new Exception('Gagal update stock: ' . $stmt_update_stock->error);
-        }
-        
-        // Insert ke STOCK_HISTORY
-        $id_history = '';
-        do {
-            $id_history = ShortIdGenerator::generate(16, '');
-        } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
-        
-        // Untuk STOCK_HISTORY toko, semua dalam PIECES
-        // JUMLAH_AWAL: JUMLAH_SISTEM (dalam PIECES)
-        // JUMLAH_PERUBAHAN: SELISIH (dalam PIECES, bisa positif atau negatif)
-        // JUMLAH_AKHIR: JUMLAH_SEBENARNYA (dalam PIECES)
-        // SATUAN: 'PIECES'
-        $jumlah_awal_history = $jumlah_sistem_pieces; // JUMLAH_SISTEM dalam PIECES
-        $jumlah_perubahan_history = $selisih_pieces; // SELISIH dalam PIECES
-        $jumlah_akhir_history = $jumlah_sebenarnya_pieces; // JUMLAH_SEBENARNYA dalam PIECES
-        $satuan_history = 'PIECES'; // Stock toko selalu PIECES
-        
-        $insert_history = "INSERT INTO STOCK_HISTORY 
-                          (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, 'OPNAME', ?, ?)";
-        $stmt_history = $conn->prepare($insert_history);
-        if (!$stmt_history) {
-            throw new Exception('Gagal prepare query insert history: ' . $conn->error);
-        }
-        $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal_history, $jumlah_perubahan_history, $jumlah_akhir_history, $id_opname, $satuan_history);
-        if (!$stmt_history->execute()) {
-            throw new Exception('Gagal insert history: ' . $stmt_history->error);
+        // Process setiap barang
+        foreach ($barang_data as $barang_item) {
+            $kd_barang = isset($barang_item['kd_barang']) ? trim($barang_item['kd_barang']) : '';
+            $jumlah_sebenarnya_pieces = isset($barang_item['jumlah_sebenarnya']) ? intval($barang_item['jumlah_sebenarnya']) : -1;
+            
+            if (empty($kd_barang) || $jumlah_sebenarnya_pieces < 0) {
+                continue; // Skip jika data tidak valid
+            }
+            
+            // Get data stock dan master barang
+            $query_barang = "SELECT 
+                s.JUMLAH_BARANG as JUMLAH_SISTEM,
+                s.SATUAN as SATUAN_STOCK,
+                mb.SATUAN_PERDUS,
+                mb.AVG_HARGA_BELI_PIECES,
+                mb.NAMA_BARANG,
+                COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
+                COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI
+            FROM STOCK s
+            INNER JOIN MASTER_BARANG mb ON s.KD_BARANG = mb.KD_BARANG
+            LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
+            LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
+            WHERE s.KD_BARANG = ? AND s.KD_LOKASI = ?";
+            $stmt_barang = $conn->prepare($query_barang);
+            if (!$stmt_barang) {
+                throw new Exception('Gagal prepare query barang: ' . $conn->error);
+            }
+            $stmt_barang->bind_param("ss", $kd_barang, $kd_lokasi);
+            if (!$stmt_barang->execute()) {
+                throw new Exception('Gagal execute query barang: ' . $stmt_barang->error);
+            }
+            $result_barang = $stmt_barang->get_result();
+            
+            if ($result_barang->num_rows == 0) {
+                continue; // Skip jika barang tidak ditemukan
+            }
+            
+            $barang_info = $result_barang->fetch_assoc();
+            $jumlah_sistem_pieces = intval($barang_info['JUMLAH_SISTEM'] ?? 0);
+            $satuan_stock = $barang_info['SATUAN_STOCK'] ?? 'PIECES';
+            $satuan_perdus = intval($barang_info['SATUAN_PERDUS'] ?? 1);
+            $avg_harga_beli = floatval($barang_info['AVG_HARGA_BELI_PIECES'] ?? 0);
+            
+            // Hitung selisih
+            $selisih_pieces = $jumlah_sebenarnya_pieces - $jumlah_sistem_pieces;
+            $uang_barang = $selisih_pieces * $avg_harga_beli;
+            
+            // Generate ID opname
+            // Generate ID_OPNAME dengan format OPNM+UUID (total 16 karakter: OPNM=4, UUID=12)
+            $id_opname = '';
+            do {
+                $uuid = ShortIdGenerator::generate(12, '');
+                $id_opname = 'OPNM' . $uuid;
+            } while (checkUUIDExists($conn, 'STOCK_OPNAME', 'ID_OPNAME', $id_opname));
+            
+            // Insert ke STOCK_OPNAME
+            $insert_opname = "INSERT INTO STOCK_OPNAME 
+                            (ID_OPNAME, KD_BARANG, KD_LOKASI, ID_USERS, JUMLAH_SEBENARNYA, JUMLAH_SISTEM, SELISIH, SATUAN, SATUAN_PERDUS, TOTAL_BARANG_PIECES, HARGA_BARANG_PIECES, TOTAL_UANG)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            $stmt_opname = $conn->prepare($insert_opname);
+            if (!$stmt_opname) {
+                throw new Exception('Gagal prepare query opname: ' . $conn->error);
+            }
+            
+            $stmt_opname->bind_param("ssssiiisiiid", $id_opname, $kd_barang, $kd_lokasi, $user_id, $jumlah_sebenarnya_pieces, $jumlah_sistem_pieces, $selisih_pieces, $satuan_stock, $satuan_perdus, $selisih_pieces, $avg_harga_beli, $uang_barang);
+            if (!$stmt_opname->execute()) {
+                throw new Exception('Gagal insert opname: ' . $stmt_opname->error);
+            }
+            
+            // Update STOCK dengan jumlah sebenarnya (dalam PIECES)
+            $update_stock = "UPDATE STOCK 
+                            SET JUMLAH_BARANG = ?, 
+                                LAST_UPDATED = CURRENT_TIMESTAMP,
+                                UPDATED_BY = ?
+                            WHERE KD_BARANG = ? AND KD_LOKASI = ?";
+            $stmt_update_stock = $conn->prepare($update_stock);
+            if (!$stmt_update_stock) {
+                throw new Exception('Gagal prepare query update stock: ' . $conn->error);
+            }
+            $stmt_update_stock->bind_param("isss", $jumlah_sebenarnya_pieces, $user_id, $kd_barang, $kd_lokasi);
+            if (!$stmt_update_stock->execute()) {
+                throw new Exception('Gagal update stock: ' . $stmt_update_stock->error);
+            }
+            
+            // Insert ke STOCK_HISTORY
+            $id_history = '';
+            do {
+                // Generate ID_HISTORY_STOCK dengan format SKHY+UUID (total 16 karakter: SKHY=4, UUID=12)
+                $uuid = ShortIdGenerator::generate(12, '');
+                $id_history = 'SKHY' . $uuid;
+            } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
+            
+            $jumlah_awal_history = $jumlah_sistem_pieces;
+            $jumlah_perubahan_history = $selisih_pieces;
+            $jumlah_akhir_history = $jumlah_sebenarnya_pieces;
+            $satuan_history = 'PIECES';
+            
+            $insert_history = "INSERT INTO STOCK_HISTORY 
+                              (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, 'OPNAME', ?, ?)";
+            $stmt_history = $conn->prepare($insert_history);
+            if (!$stmt_history) {
+                throw new Exception('Gagal prepare query insert history: ' . $conn->error);
+            }
+            $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal_history, $jumlah_perubahan_history, $jumlah_akhir_history, $id_opname, $satuan_history);
+            if (!$stmt_history->execute()) {
+                throw new Exception('Gagal insert history: ' . $stmt_history->error);
+            }
+            
+            // Simpan hasil untuk popup
+            $opname_results[] = [
+                'kd_barang' => $kd_barang,
+                'nama_barang' => $barang_info['NAMA_BARANG'],
+                'merek' => $barang_info['NAMA_MEREK'],
+                'kategori' => $barang_info['NAMA_KATEGORI'],
+                'jumlah_sistem' => $jumlah_sistem_pieces,
+                'jumlah_sebenarnya' => $jumlah_sebenarnya_pieces,
+                'selisih' => $selisih_pieces,
+                'uang' => $uang_barang
+            ];
+            
+            $total_selisih_pieces += $selisih_pieces;
+            $total_uang += $uang_barang;
         }
         
         // Commit transaksi
         $conn->commit();
-        echo json_encode(['success' => true, 'message' => 'Stock opname berhasil disimpan!']);
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Stock opname berhasil disimpan!',
+            'results' => $opname_results,
+            'total_selisih_pieces' => $total_selisih_pieces,
+            'total_uang' => $total_uang
+        ]);
     } catch (Exception $e) {
         // Rollback transaksi
         $conn->rollback();
-        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        
+        $error_message = $e->getMessage();
+        $error_file = $e->getFile();
+        $error_line = $e->getLine();
+        
+        if ($conn->error) {
+            $error_message .= ' | Database Error: ' . $conn->error;
+        }
+        
+        $debug_info = '';
+        if (isset($_GET['debug']) || true) {
+            $debug_info = ' | File: ' . basename($error_file) . ' | Line: ' . $error_line;
+        }
+        
+        echo json_encode([
+            'success' => false, 
+            'message' => $error_message . $debug_info,
+            'error_detail' => [
+                'message' => $e->getMessage(),
+                'file' => basename($error_file),
+                'line' => $error_line,
+                'db_error' => $conn->error
+            ]
+        ]);
+    } catch (Error $e) {
+        // Rollback transaksi
+        $conn->rollback();
+        
+        $error_message = $e->getMessage();
+        $error_file = $e->getFile();
+        $error_line = $e->getLine();
+        
+        echo json_encode([
+            'success' => false, 
+            'message' => 'Fatal Error: ' . $error_message . ' | File: ' . basename($error_file) . ' | Line: ' . $error_line,
+            'error_detail' => [
+                'message' => $e->getMessage(),
+                'file' => basename($error_file),
+                'line' => $error_line
+            ]
+        ]);
     }
     
     exit();
@@ -275,20 +283,13 @@ function formatWaktuTerakhirOpname($waktu) {
     // Set timezone ke Asia/Jakarta (WIB)
     date_default_timezone_set('Asia/Jakarta');
     
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
     // Buat DateTime dengan timezone Asia/Jakarta
     $timezone = new DateTimeZone('Asia/Jakarta');
     $date = new DateTime($waktu, $timezone);
     $now = new DateTime('now', $timezone);
     $diff = $now->diff($date);
     
-    $tanggal_formatted = $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
-    $waktu_formatted = $date->format('H:i') . ' WIB';
+    $waktu_formatted = $date->format('d/m/Y H:i') . ' WIB';
     
     // Hitung selisih waktu
     $selisih_text = '';
@@ -306,7 +307,7 @@ function formatWaktuTerakhirOpname($waktu) {
         $selisih_text = 'baru saja';
     }
     
-    return $tanggal_formatted . ' ' . $waktu_formatted . ' (' . $selisih_text . ')';
+    return $waktu_formatted . ' (' . $selisih_text . ')';
 }
 
 // Set active page untuk sidebar
@@ -326,6 +327,11 @@ $active_page = 'stock_opname';
     <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
     <!-- Custom CSS -->
     <link href="../assets/css/style.css" rel="stylesheet">
+    <style>
+        .table-barang-opname input[type="number"] {
+            text-align: right;
+        }
+    </style>
 </head>
 <body class="dashboard-body">
     <?php include 'includes/sidebar.php'; ?>
@@ -338,6 +344,13 @@ $active_page = 'stock_opname';
             <?php if (!empty($alamat_lokasi)): ?>
                 <p class="text-muted mb-0"><?php echo htmlspecialchars($alamat_lokasi); ?></p>
             <?php endif; ?>
+        </div>
+
+        <!-- Button untuk buka modal stock opname -->
+        <div class="mb-4">
+            <button class="btn btn-primary" onclick="bukaModalOpname()">
+                <i class="bi bi-clipboard-check"></i> Stock Opname
+            </button>
         </div>
 
         <!-- Table Stock Opname -->
@@ -354,7 +367,6 @@ $active_page = 'stock_opname';
                             <th>Stock Sekarang</th>
                             <th>Satuan</th>
                             <th>Waktu Terakhir Stock Opname</th>
-                            <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -369,14 +381,11 @@ $active_page = 'stock_opname';
                                     <td><?php echo number_format($row['STOCK_SEKARANG'], 0, ',', '.'); ?></td>
                                     <td><?php echo htmlspecialchars($row['SATUAN']); ?></td>
                                     <td><?php echo formatWaktuTerakhirOpname($row['WAKTU_TERAKHIR_OPNAME']); ?></td>
-                                    <td>
-                                        <button class="btn-view btn-sm" onclick="bukaModalOpname('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($row['NAMA_MEREK']); ?>', '<?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?>', '<?php echo htmlspecialchars($row['NAMA_BARANG']); ?>', <?php echo $row['BERAT']; ?>, <?php echo $row['STOCK_SEKARANG']; ?>, '<?php echo htmlspecialchars($row['SATUAN']); ?>')">Stock Opname</button>
-                                    </td>
                                 </tr>
                             <?php endwhile; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="9" class="text-center text-muted">Tidak ada data stock</td>
+                                <td colspan="8" class="text-center text-muted">Tidak ada data stock</td>
                             </tr>
                         <?php endif; ?>
                     </tbody>
@@ -387,7 +396,7 @@ $active_page = 'stock_opname';
 
     <!-- Modal Stock Opname -->
     <div class="modal fade" id="modalStockOpname" tabindex="-1" aria-labelledby="modalStockOpnameLabel" aria-hidden="true">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
                     <h5 class="modal-title" id="modalStockOpnameLabel">Stock Opname</h5>
@@ -395,41 +404,50 @@ $active_page = 'stock_opname';
                 </div>
                 <div class="modal-body">
                     <form id="formOpname">
-                        <input type="hidden" id="opname_kd_barang" name="kd_barang">
-                        <input type="hidden" id="opname_satuan" name="satuan" value="PIECES">
-                        
-                        <div class="row g-2">
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold small">Merek Barang</label>
-                                <input type="text" class="form-control form-control-sm" id="opname_merek_barang" readonly style="background-color: #e9ecef;">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold small">Kode Barang</label>
-                                <input type="text" class="form-control form-control-sm" id="opname_kode_barang" readonly style="background-color: #e9ecef;">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold small">Kategori Barang</label>
-                                <input type="text" class="form-control form-control-sm" id="opname_kategori_barang" readonly style="background-color: #e9ecef;">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold small">Berat (gr)</label>
-                                <input type="text" class="form-control form-control-sm" id="opname_berat" readonly style="background-color: #e9ecef;">
-                            </div>
-                            <div class="col-md-12">
-                                <label class="form-label fw-bold small">Nama Barang</label>
-                                <input type="text" class="form-control form-control-sm" id="opname_nama_barang" readonly style="background-color: #e9ecef;">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold small">Jumlah di sistem (pieces)</label>
-                                <input type="text" class="form-control form-control-sm" id="opname_stock_sistem" readonly style="background-color: #e9ecef;">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold small">Jumlah sebenarnya (pieces) <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control form-control-sm" id="opname_jumlah_sebenarnya" name="jumlah_sebenarnya" min="0" step="1" required>
-                            </div>
-                            <div class="col-12">
-                                <label class="form-label fw-bold small">Selisih (pieces)</label>
-                                <input type="text" class="form-control form-control-sm" id="opname_selisih" readonly style="background-color: #e9ecef;">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Input Jumlah Sebenarnya (pieces) <span class="text-danger">*</span></label>
+                            <small class="text-muted d-block mb-2">Masukkan jumlah sebenarnya untuk setiap barang. Selisih akan ditampilkan setelah menyimpan.</small>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered table-barang-opname">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width: 15%;">Kode Barang</th>
+                                            <th style="width: 18%;">Merek</th>
+                                            <th style="width: 18%;">Kategori</th>
+                                            <th style="width: 24%;">Nama Barang</th>
+                                            <th style="width: 25%;">Jumlah Sebenarnya (pieces) <span class="text-danger">*</span></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tbodyBarang">
+                                        <?php 
+                                        $result_stock->data_seek(0);
+                                        if ($result_stock && $result_stock->num_rows > 0): 
+                                            while ($row = $result_stock->fetch_assoc()): 
+                                        ?>
+                                            <tr>
+                                                <td><?php echo htmlspecialchars($row['KD_BARANG']); ?></td>
+                                                <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
+                                                <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
+                                                <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
+                                                <td>
+                                                    <input type="number" class="form-control form-control-sm text-end" 
+                                                        name="jumlah_sebenarnya_<?php echo htmlspecialchars($row['KD_BARANG']); ?>" 
+                                                        data-kd-barang="<?php echo htmlspecialchars($row['KD_BARANG']); ?>" 
+                                                        data-sistem="<?php echo $row['STOCK_SEKARANG']; ?>" 
+                                                        placeholder="Masukkan jumlah sebenarnya" 
+                                                        min="0" step="1">
+                                                </td>
+                                            </tr>
+                                        <?php 
+                                            endwhile; 
+                                        else: 
+                                        ?>
+                                            <tr>
+                                                <td colspan="5" class="text-center text-muted">Tidak ada data barang</td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </form>
@@ -465,10 +483,7 @@ $active_page = 'stock_opname';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[0, 'asc']], // Sort by Kode Barang ascending
-                columnDefs: [
-                    { orderable: false, targets: [8] } // Disable sorting on Action column
-                ],
+                order: [[0, 'asc']],
                 scrollX: true,
                 autoWidth: false
             }).on('error.dt', function(e, settings, techNote, message) {
@@ -477,107 +492,34 @@ $active_page = 'stock_opname';
             });
         });
 
-        function bukaModalOpname(kdBarang, namaMerek, namaKategori, namaBarang, berat, stockSistem, satuan) {
-            // Get data barang untuk mendapatkan satuan perdus
-            $.ajax({
-                url: '',
-                method: 'GET',
-                data: {
-                    get_barang_data: '1',
-                    kd_barang: kdBarang
-                },
-                dataType: 'json',
-                success: function(response) {
-                    if (response.success) {
-                        // Stock toko selalu PIECES
-                        var stockSistemPieces = stockSistem;
-                        
-                        // Set form values
-                        $('#opname_kd_barang').val(kdBarang);
-                        $('#opname_merek_barang').val(namaMerek);
-                        $('#opname_kategori_barang').val(namaKategori);
-                        $('#opname_kode_barang').val(kdBarang);
-                        $('#opname_nama_barang').val(namaBarang);
-                        $('#opname_berat').val(numberFormat(berat));
-                        $('#opname_stock_sistem').val(numberFormat(stockSistemPieces));
-                        $('#opname_jumlah_sebenarnya').val('');
-                        $('#opname_selisih').val('');
-                        
-                        // Store data untuk perhitungan
-                        $('#opname_stock_sistem').data('stock-sistem-pieces', stockSistemPieces);
-                        
-                        // Buka modal
-                        $('#modalStockOpname').modal('show');
-                    } else {
-                        Swal.fire({
-                            icon: 'error',
-                            title: 'Error!',
-                            text: response.message || 'Gagal memuat data barang!',
-                            confirmButtonColor: '#e74c3c'
-                        });
-                    }
-                },
-                error: function() {
-                    // Jika AJAX gagal, tetap buka modal dengan data yang ada
-                    var stockSistemPieces = stockSistem;
-                    
-                    $('#opname_kd_barang').val(kdBarang);
-                    $('#opname_merek_barang').val(namaMerek);
-                    $('#opname_kategori_barang').val(namaKategori);
-                    $('#opname_kode_barang').val(kdBarang);
-                    $('#opname_nama_barang').val(namaBarang);
-                    $('#opname_berat').val(numberFormat(berat));
-                    $('#opname_stock_sistem').val(numberFormat(stockSistemPieces));
-                    $('#opname_jumlah_sebenarnya').val('');
-                    $('#opname_selisih').val('');
-                    
-                    $('#opname_stock_sistem').data('stock-sistem-pieces', stockSistemPieces);
-                    
-                    $('#modalStockOpname').modal('show');
-                }
-            });
-        }
-
-        // Event listener untuk hitung selisih
-        $(document).on('input', '#opname_jumlah_sebenarnya', function() {
-            hitungSelisih();
-        });
-
-        function hitungSelisih() {
-            var stockSistemPieces = parseInt($('#opname_stock_sistem').data('stock-sistem-pieces')) || 0;
-            var jumlahSebenarnya = parseInt($('#opname_jumlah_sebenarnya').val()) || 0;
+        function bukaModalOpname() {
+            // Reset form
+            $('#formOpname')[0].reset();
             
-            // Hitung selisih dalam PIECES
-            var selisihPieces = jumlahSebenarnya - stockSistemPieces;
-            
-            // Format selisih
-            var selisihText = numberFormat(Math.abs(selisihPieces));
-            if (selisihPieces > 0) {
-                selisihText = '+' + selisihText + ' (Lebih)';
-            } else if (selisihPieces < 0) {
-                selisihText = '-' + selisihText + ' (Kurang)';
-            } else {
-                selisihText = '0 (Sesuai)';
-            }
-            
-            $('#opname_selisih').val(selisihText);
+            // Buka modal
+            $('#modalStockOpname').modal('show');
         }
 
         function simpanOpname() {
-            // Validasi form
-            if (!$('#formOpname')[0].checkValidity()) {
-                $('#formOpname')[0].reportValidity();
-                return;
-            }
+            // Collect barang data
+            var barang = [];
+            $('input[data-kd-barang]').each(function() {
+                var kdBarang = $(this).data('kd-barang');
+                var jumlahSebenarnya = parseInt($(this).val()) || -1;
+                
+                if (jumlahSebenarnya >= 0) {
+                    barang.push({
+                        kd_barang: kdBarang,
+                        jumlah_sebenarnya: jumlahSebenarnya
+                    });
+                }
+            });
 
-            var kdBarang = $('#opname_kd_barang').val();
-            var jumlahSebenarnya = parseInt($('#opname_jumlah_sebenarnya').val()) || 0;
-
-            if (jumlahSebenarnya < 0) {
+            if (barang.length === 0) {
                 Swal.fire({
                     icon: 'error',
                     title: 'Error!',
-                    text: 'Jumlah sebenarnya tidak boleh negatif!',
+                    text: 'Tidak ada barang yang diinput!',
                     confirmButtonColor: '#e74c3c'
                 });
                 return;
@@ -587,7 +529,7 @@ $active_page = 'stock_opname';
             Swal.fire({
                 icon: 'question',
                 title: 'Konfirmasi',
-                text: 'Apakah Anda yakin ingin menyimpan stock opname ini?',
+                text: 'Apakah Anda yakin ingin menyimpan stock opname untuk ' + barang.length + ' barang?',
                 showCancelButton: true,
                 confirmButtonText: 'Ya, Simpan',
                 cancelButtonText: 'Batal',
@@ -600,31 +542,105 @@ $active_page = 'stock_opname';
                         method: 'POST',
                         data: {
                             action: 'simpan_opname',
-                            kd_barang: kdBarang,
-                            jumlah_sebenarnya: jumlahSebenarnya
+                            barang: barang
                         },
                         dataType: 'json',
                         success: function(response) {
                             if (response.success) {
+                                // Tutup modal dulu
+                                $('#modalStockOpname').modal('hide');
+                                
+                                // Buat HTML untuk popup hasil
+                                var htmlContent = '<div class="text-start">';
+                                htmlContent += '<h6 class="mb-3">Hasil Stock Opname:</h6>';
+                                htmlContent += '<div class="table-responsive">';
+                                htmlContent += '<table class="table table-sm table-bordered">';
+                                htmlContent += '<thead class="table-light"><tr>';
+                                htmlContent += '<th>Kode Barang</th>';
+                                htmlContent += '<th>Nama Barang</th>';
+                                htmlContent += '<th class="text-end">Jumlah Sistem</th>';
+                                htmlContent += '<th class="text-end">Jumlah Sebenarnya</th>';
+                                htmlContent += '<th class="text-center">Selisih (Lebih/Kurang)</th>';
+                                htmlContent += '<th class="text-end">Nilai (Rp)</th>';
+                                htmlContent += '</tr></thead><tbody>';
+                                
+                                response.results.forEach(function(result) {
+                                    var selisihClass = result.selisih > 0 ? 'text-success fw-bold' : (result.selisih < 0 ? 'text-danger fw-bold' : 'text-muted');
+                                    var selisihText = '';
+                                    if (result.selisih > 0) {
+                                        selisihText = '<span class="badge bg-success">+ ' + numberFormat(result.selisih) + ' pieces (LEBIH)</span>';
+                                    } else if (result.selisih < 0) {
+                                        selisihText = '<span class="badge bg-danger">' + numberFormat(result.selisih) + ' pieces (KURANG)</span>';
+                                    } else {
+                                        selisihText = '<span class="badge bg-secondary">0 pieces (SESUAI)</span>';
+                                    }
+                                    var uangText = result.uang >= 0 ? 'Rp. ' + numberFormat(result.uang) : '-Rp. ' + numberFormat(Math.abs(result.uang));
+                                    
+                                    htmlContent += '<tr>';
+                                    htmlContent += '<td>' + result.kd_barang + '</td>';
+                                    htmlContent += '<td>' + result.nama_barang + '</td>';
+                                    htmlContent += '<td class="text-end">' + numberFormat(result.jumlah_sistem) + ' pieces</td>';
+                                    htmlContent += '<td class="text-end">' + numberFormat(result.jumlah_sebenarnya) + ' pieces</td>';
+                                    htmlContent += '<td class="text-center ' + selisihClass + '">' + selisihText + '</td>';
+                                    htmlContent += '<td class="text-end ' + selisihClass + '">' + uangText + '</td>';
+                                    htmlContent += '</tr>';
+                                });
+                                
+                                htmlContent += '</tbody></table>';
+                                htmlContent += '</div>';
+                                
+                                // Total
+                                var totalSelisihClass = response.total_selisih_pieces > 0 ? 'text-success fw-bold' : (response.total_selisih_pieces < 0 ? 'text-danger fw-bold' : 'text-muted');
+                                var totalSelisihText = '';
+                                if (response.total_selisih_pieces > 0) {
+                                    totalSelisihText = '<span class="badge bg-success">+ ' + numberFormat(response.total_selisih_pieces) + ' pieces (LEBIH)</span>';
+                                } else if (response.total_selisih_pieces < 0) {
+                                    totalSelisihText = '<span class="badge bg-danger">' + numberFormat(response.total_selisih_pieces) + ' pieces (KURANG)</span>';
+                                } else {
+                                    totalSelisihText = '<span class="badge bg-secondary">0 pieces (SESUAI)</span>';
+                                }
+                                var totalUangText = response.total_uang >= 0 ? 'Rp. ' + numberFormat(response.total_uang) : '-Rp. ' + numberFormat(Math.abs(response.total_uang));
+                                
+                                htmlContent += '<div class="mt-3 p-3 bg-light rounded border">';
+                                htmlContent += '<div class="mb-2"><strong>Total Selisih: </strong>' + totalSelisihText + '</div>';
+                                htmlContent += '<div><strong>Total Nilai: <span class="' + totalSelisihClass + '">' + totalUangText + '</span></strong></div>';
+                                htmlContent += '</div>';
+                                htmlContent += '</div>';
+                                
                                 Swal.fire({
                                     icon: 'success',
                                     title: 'Berhasil!',
-                                    text: response.message,
+                                    html: htmlContent,
+                                    confirmButtonText: 'OK',
                                     confirmButtonColor: '#667eea',
-                                    timer: 1500,
-                                    timerProgressBar: true
+                                    width: '900px'
                                 }).then(() => {
-                                    // Tutup modal dan reload halaman
-                                    $('#modalStockOpname').modal('hide');
                                     location.reload();
                                 });
                             } else {
+                                var errorText = response.message || 'Terjadi kesalahan tidak diketahui';
+                                if (response.error_detail) {
+                                    errorText += '\n\nDetail Error:';
+                                    if (response.error_detail.file) {
+                                        errorText += '\nFile: ' + response.error_detail.file;
+                                    }
+                                    if (response.error_detail.line) {
+                                        errorText += '\nLine: ' + response.error_detail.line;
+                                    }
+                                    if (response.error_detail.db_error) {
+                                        errorText += '\nDatabase Error: ' + response.error_detail.db_error;
+                                    }
+                                }
+                                
                                 Swal.fire({
                                     icon: 'error',
                                     title: 'Gagal!',
-                                    text: response.message,
-                                    confirmButtonColor: '#e74c3c'
+                                    text: errorText,
+                                    confirmButtonColor: '#e74c3c',
+                                    width: '700px'
                                 });
+                                
+                                console.error('Stock Opname Error:', response);
                             }
                         },
                         error: function(xhr, status, error) {
@@ -662,9 +678,7 @@ $active_page = 'stock_opname';
         // Reset modal saat ditutup
         $('#modalStockOpname').on('hidden.bs.modal', function() {
             $('#formOpname')[0].reset();
-            $('#opname_selisih').val('');
         });
     </script>
 </body>
 </html>
-

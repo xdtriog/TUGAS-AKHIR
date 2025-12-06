@@ -102,7 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     exit();
 }
 
-// Query untuk mendapatkan riwayat resupply
+// Query untuk mendapatkan riwayat resupply dengan batch
 $query_riwayat = "SELECT 
     dtb.ID_DETAIL_TRANSFER_BARANG,
     dtb.ID_TRANSFER_BARANG,
@@ -117,11 +117,22 @@ $query_riwayat = "SELECT
     tb.STATUS as STATUS_TRANSFER,
     tb.KD_LOKASI_ASAL,
     tb.KD_LOKASI_TUJUAN,
-    COALESCE(s.SATUAN, 'PIECES') as SATUAN
+    COALESCE(s.SATUAN, 'PIECES') as SATUAN,
+    GROUP_CONCAT(
+        CONCAT(dtbb.ID_DETAIL_TRANSFER_BARANG_BATCH, ':', pb.ID_PESAN_BARANG, ':', dtbb.JUMLAH_PESAN_TRANSFER_BATCH_DUS, ':', COALESCE(pb.TGL_EXPIRED, ''))
+        ORDER BY pb.TGL_EXPIRED ASC
+        SEPARATOR '|'
+    ) as BATCH_INFO
 FROM DETAIL_TRANSFER_BARANG dtb
 INNER JOIN TRANSFER_BARANG tb ON dtb.ID_TRANSFER_BARANG = tb.ID_TRANSFER_BARANG
 LEFT JOIN STOCK s ON dtb.KD_BARANG = s.KD_BARANG AND tb.KD_LOKASI_TUJUAN = s.KD_LOKASI
+LEFT JOIN DETAIL_TRANSFER_BARANG_BATCH dtbb ON dtb.ID_DETAIL_TRANSFER_BARANG = dtbb.ID_DETAIL_TRANSFER_BARANG
+LEFT JOIN PESAN_BARANG pb ON dtbb.ID_PESAN_BARANG = pb.ID_PESAN_BARANG
 WHERE dtb.KD_BARANG = ? AND tb.KD_LOKASI_TUJUAN = ?
+GROUP BY dtb.ID_DETAIL_TRANSFER_BARANG, dtb.ID_TRANSFER_BARANG, dtb.TOTAL_PESAN_TRANSFER_DUS, 
+         dtb.TOTAL_KIRIM_DUS, dtb.TOTAL_DITOLAK_DUS, dtb.TOTAL_MASUK_DUS, dtb.STATUS,
+         tb.WAKTU_PESAN_TRANSFER, tb.WAKTU_KIRIM_TRANSFER, tb.WAKTU_SELESAI_TRANSFER, 
+         tb.STATUS, tb.KD_LOKASI_ASAL, tb.KD_LOKASI_TUJUAN, s.SATUAN
 ORDER BY tb.WAKTU_PESAN_TRANSFER DESC, dtb.ID_DETAIL_TRANSFER_BARANG DESC";
 
 $stmt_riwayat = $conn->prepare($query_riwayat);
@@ -137,23 +148,16 @@ while ($lok = $result_all_lokasi->fetch_assoc()) {
     $lokasi_map[$lok['KD_LOKASI']] = $lok['KD_LOKASI'] . '-' . $lok['NAMA_LOKASI'] . '-' . $lok['ALAMAT_LOKASI'];
 }
 
-// Format waktu stack
+// Format waktu stack (dd/mm/yyyy HH:ii WIB)
 function formatWaktuStack($waktu_pesan, $waktu_kirim, $waktu_selesai, $status_detail) {
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
     $html = '<div class="d-flex flex-column gap-1">';
     
     // Waktu diterima (jika ada WAKTU_SELESAI dan status SELESAI) - tampilkan di atas
     if (!empty($waktu_selesai) && $status_detail == 'SELESAI') {
         $date_sampai = new DateTime($waktu_selesai);
-        $tanggal_sampai = $date_sampai->format('d') . ' ' . $bulan[(int)$date_sampai->format('m')] . ' ' . $date_sampai->format('Y');
-        $waktu_sampai_formatted = $date_sampai->format('H:i') . ' WIB';
+        $waktu_sampai_formatted = $date_sampai->format('d/m/Y H:i') . ' WIB';
         $html .= '<div>';
-        $html .= htmlspecialchars($tanggal_sampai . ' ' . $waktu_sampai_formatted) . ' ';
+        $html .= htmlspecialchars($waktu_sampai_formatted) . ' ';
         $html .= '<span class="badge bg-success">DITERIMA</span>';
         $html .= '</div>';
     }
@@ -161,10 +165,9 @@ function formatWaktuStack($waktu_pesan, $waktu_kirim, $waktu_selesai, $status_de
     // Waktu Dikirim - tampilkan di tengah (jika ada)
     if (!empty($waktu_kirim)) {
         $date_kirim = new DateTime($waktu_kirim);
-        $tanggal_kirim = $date_kirim->format('d') . ' ' . $bulan[(int)$date_kirim->format('m')] . ' ' . $date_kirim->format('Y');
-        $waktu_kirim_formatted = $date_kirim->format('H:i') . ' WIB';
+        $waktu_kirim_formatted = $date_kirim->format('d/m/Y H:i') . ' WIB';
         $html .= '<div>';
-        $html .= htmlspecialchars($tanggal_kirim . ' ' . $waktu_kirim_formatted) . ' ';
+        $html .= htmlspecialchars($waktu_kirim_formatted) . ' ';
         $html .= '<span class="badge bg-info">DIKIRIM</span>';
         $html .= '</div>';
     }
@@ -172,10 +175,9 @@ function formatWaktuStack($waktu_pesan, $waktu_kirim, $waktu_selesai, $status_de
     // Waktu dipesan - tampilkan di bawah
     if (!empty($waktu_pesan)) {
         $date_pesan = new DateTime($waktu_pesan);
-        $tanggal_pesan = $date_pesan->format('d') . ' ' . $bulan[(int)$date_pesan->format('m')] . ' ' . $date_pesan->format('Y');
-        $waktu_pesan_formatted = $date_pesan->format('H:i') . ' WIB';
+        $waktu_pesan_formatted = $date_pesan->format('d/m/Y H:i') . ' WIB';
         $html .= '<div>';
-        $html .= htmlspecialchars($tanggal_pesan . ' ' . $waktu_pesan_formatted) . ' ';
+        $html .= htmlspecialchars($waktu_pesan_formatted) . ' ';
         $html .= '<span class="badge bg-warning">DIPESAN</span>';
         $html .= '</div>';
     }
@@ -253,6 +255,7 @@ $active_page = 'stock';
                             <th>Total Masuk (dus)</th>
                             <th>Total Dikirim (dus)</th>
                             <th>Total Ditolak (dus)</th>
+                            <th>Batch</th>
                             <th>STATUS</th>
                             <th>ACTION</th>
                         </tr>
@@ -270,6 +273,34 @@ $active_page = 'stock';
                                     <td><?php echo $row['TOTAL_MASUK_DUS'] ? number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['TOTAL_KIRIM_DUS'] ? number_format($row['TOTAL_KIRIM_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['TOTAL_DITOLAK_DUS'] ? number_format($row['TOTAL_DITOLAK_DUS'], 0, ',', '.') : '-'; ?></td>
+                                    <td>
+                                        <?php 
+                                        if (!empty($row['BATCH_INFO'])) {
+                                            $batches = explode('|', $row['BATCH_INFO']);
+                                            echo '<div class="d-flex flex-column gap-1">';
+                                            foreach ($batches as $batch_str) {
+                                                $batch_parts = explode(':', $batch_str);
+                                                if (count($batch_parts) >= 3) {
+                                                    $id_pesan = htmlspecialchars($batch_parts[1]);
+                                                    $jumlah_dus = number_format(intval($batch_parts[2]), 0, ',', '.');
+                                                    $tgl_expired = !empty($batch_parts[3]) ? htmlspecialchars($batch_parts[3]) : '-';
+                                                    
+                                                    echo '<div class="small">';
+                                                    echo '<strong>' . $id_pesan . '</strong><br>';
+                                                    echo 'Jumlah: ' . $jumlah_dus . ' dus';
+                                                    if ($tgl_expired != '-') {
+                                                        $date_expired = new DateTime($tgl_expired);
+                                                        echo '<br>Exp: ' . $date_expired->format('d/m/Y');
+                                                    }
+                                                    echo '</div>';
+                                                }
+                                            }
+                                            echo '</div>';
+                                        } else {
+                                            echo '-';
+                                        }
+                                        ?>
+                                    </td>
                                     <td>
                                         <?php 
                                         $status_text = '';
@@ -314,7 +345,7 @@ $active_page = 'stock';
                             <?php endwhile; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="11" class="text-center text-muted">Tidak ada riwayat resupply</td>
+                                <td colspan="12" class="text-center text-muted">Tidak ada riwayat resupply</td>
                             </tr>
                         <?php endif; ?>
                     </tbody>
@@ -366,7 +397,7 @@ $active_page = 'stock';
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
                 order: [[0, 'desc']], // Sort by ID TRANSFER descending
                 columnDefs: [
-                    { orderable: false, targets: [10] } // Disable sorting on Action column
+                    { orderable: false, targets: [9, 11] } // Disable sorting on Batch and Action columns
                 ],
                 scrollX: true,
                 autoWidth: false

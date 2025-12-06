@@ -160,9 +160,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         $total_uang = $total_barang_pieces * $harga_barang_pieces;
         
         // Generate ID mutasi
+        // Generate ID_MUTASI_BARANG_RUSAK dengan format MTRK+UUID (total 16 karakter: MTRK=4, UUID=12)
         $id_mutasi = '';
         do {
-            $id_mutasi = ShortIdGenerator::generate(16, '');
+            $uuid = ShortIdGenerator::generate(12, '');
+            $id_mutasi = 'MTRK' . $uuid;
         } while (checkUUIDExists($conn, 'MUTASI_BARANG_RUSAK', 'ID_MUTASI_BARANG_RUSAK', $id_mutasi));
         
         // Insert ke MUTASI_BARANG_RUSAK
@@ -197,7 +199,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         // Insert ke STOCK_HISTORY
         $id_history = '';
         do {
-            $id_history = ShortIdGenerator::generate(16, '');
+            // Generate ID_HISTORY_STOCK dengan format SKHY+UUID (total 16 karakter: SKHY=4, UUID=12)
+            $uuid = ShortIdGenerator::generate(12, '');
+            $id_history = 'SKHY' . $uuid;
         } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
         
         // Untuk STOCK_HISTORY toko, semua dalam PIECES
@@ -269,20 +273,13 @@ function formatWaktuTerakhirMutasi($waktu) {
     // Set timezone ke Asia/Jakarta (WIB)
     date_default_timezone_set('Asia/Jakarta');
     
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
     // Buat DateTime dengan timezone Asia/Jakarta
     $timezone = new DateTimeZone('Asia/Jakarta');
     $date = new DateTime($waktu, $timezone);
     $now = new DateTime('now', $timezone);
     $diff = $now->diff($date);
     
-    $tanggal_formatted = $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
-    $waktu_formatted = $date->format('H:i') . ' WIB';
+    $waktu_formatted = $date->format('d/m/Y H:i') . ' WIB';
     
     // Hitung selisih waktu
     $selisih_text = '';
@@ -300,7 +297,7 @@ function formatWaktuTerakhirMutasi($waktu) {
         $selisih_text = 'baru saja';
     }
     
-    return $tanggal_formatted . ' ' . $waktu_formatted . ' (' . $selisih_text . ')';
+    return $waktu_formatted . ' (' . $selisih_text . ')';
 }
 
 // Set active page untuk sidebar

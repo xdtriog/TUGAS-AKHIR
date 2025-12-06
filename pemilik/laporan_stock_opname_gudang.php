@@ -43,6 +43,7 @@ $tanggal_dari = isset($_GET['tanggal_dari']) ? trim($_GET['tanggal_dari']) : dat
 $tanggal_sampai = isset($_GET['tanggal_sampai']) ? trim($_GET['tanggal_sampai']) : date('Y-m-t');
 
 // Query untuk mendapatkan data stock opname dengan informasi batch
+// Menggunakan REF_BATCH langsung dari STOCK_OPNAME untuk menghindari duplikat
 $query_opname = "SELECT 
     so.ID_OPNAME,
     so.KD_BARANG,
@@ -55,11 +56,11 @@ $query_opname = "SELECT
     so.TOTAL_BARANG_PIECES,
     so.HARGA_BARANG_PIECES,
     so.TOTAL_UANG,
+    so.REF_BATCH as ID_PESAN_BARANG,
     u.NAMA as NAMA_USER,
     mb.NAMA_BARANG,
     COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
     COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
-    sh.REF as ID_PESAN_BARANG,
     pb.TGL_EXPIRED,
     COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER
 FROM STOCK_OPNAME so
@@ -67,11 +68,7 @@ INNER JOIN MASTER_BARANG mb ON so.KD_BARANG = mb.KD_BARANG
 LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
 LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
 LEFT JOIN USERS u ON so.ID_USERS = u.ID_USERS
-LEFT JOIN STOCK_HISTORY sh ON sh.KD_BARANG = so.KD_BARANG 
-    AND sh.KD_LOKASI = so.KD_LOKASI 
-    AND sh.TIPE_PERUBAHAN = 'OPNAME'
-    AND ABS(TIMESTAMPDIFF(SECOND, sh.WAKTU_CHANGE, so.WAKTU_OPNAME)) <= 5
-LEFT JOIN PESAN_BARANG pb ON sh.REF = pb.ID_PESAN_BARANG
+LEFT JOIN PESAN_BARANG pb ON so.REF_BATCH = pb.ID_PESAN_BARANG
 LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
 WHERE so.KD_LOKASI = ?
 AND DATE(so.WAKTU_OPNAME) BETWEEN ? AND ?
@@ -103,22 +100,22 @@ function formatRupiah($angka) {
     return "Rp. " . number_format($angka, 0, ',', '.');
 }
 
-// Format tanggal
+// Format tanggal (dd/mm/yyyy)
 function formatTanggal($tanggal) {
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
+    if (empty($tanggal) || $tanggal == null) {
+        return '-';
+    }
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    return $date->format('d/m/Y');
 }
 
-// Format waktu
+// Format waktu (dd/mm/yyyy HH:ii WIB)
 function formatWaktu($waktu) {
+    if (empty($waktu) || $waktu == null) {
+        return '-';
+    }
     $date = new DateTime($waktu);
-    return $date->format('d/m/Y H:i');
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Format tanggal expired dengan indikator
@@ -238,10 +235,12 @@ $active_page = 'laporan';
                             <th>ID Batch</th>
                             <th>Tanggal Expired</th>
                             <th>Supplier</th>
-                            <th>Jumlah Sistem</th>
-                            <th>Jumlah Sebenarnya</th>
-                            <th>Selisih</th>
-                            <th>Satuan</th>
+                            <th>Jumlah Sistem (dus)</th>
+                            <th>Jumlah Sebenarnya (dus)</th>
+                            <th>Selisih (dus)</th>
+                            <th>Satuan per Dus</th>
+                            <th>Selisih (Pieces)</th>
+                            <th>Harga (Rp/Piece)</th>
                             <th>Total Nilai Selisih</th>
                             <th>User</th>
                         </tr>
@@ -250,7 +249,7 @@ $active_page = 'laporan';
                         <?php if ($result_opname && $result_opname->num_rows > 0): ?>
                             <?php while ($row = $result_opname->fetch_assoc()): ?>
                                 <tr>
-                                    <td><?php echo formatWaktu($row['WAKTU_OPNAME']); ?></td>
+                                    <td data-order="<?php echo strtotime($row['WAKTU_OPNAME']); ?>"><?php echo formatWaktu($row['WAKTU_OPNAME']); ?></td>
                                     <td><?php echo htmlspecialchars($row['ID_OPNAME']); ?></td>
                                     <td><?php echo htmlspecialchars($row['KD_BARANG']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
@@ -266,7 +265,13 @@ $active_page = 'laporan';
                                             <?php echo ($row['SELISIH'] > 0 ? '+' : '') . number_format($row['SELISIH'], 0, ',', '.'); ?>
                                         </span>
                                     </td>
-                                    <td><?php echo htmlspecialchars($row['SATUAN']); ?></td>
+                                    <td><?php echo number_format($row['SATUAN_PERDUS'], 0, ',', '.'); ?></td>
+                                    <td>
+                                        <span class="<?php echo $row['TOTAL_BARANG_PIECES'] < 0 ? 'text-danger' : ($row['TOTAL_BARANG_PIECES'] > 0 ? 'text-success' : 'text-muted'); ?> fw-bold">
+                                            <?php echo ($row['TOTAL_BARANG_PIECES'] > 0 ? '+' : '') . number_format($row['TOTAL_BARANG_PIECES'], 0, ',', '.'); ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo formatRupiah($row['HARGA_BARANG_PIECES']); ?></td>
                                     <td>
                                         <span class="<?php echo $row['TOTAL_UANG'] < 0 ? 'text-danger' : ($row['TOTAL_UANG'] > 0 ? 'text-success' : 'text-muted'); ?> fw-bold">
                                             <?php echo formatRupiah($row['TOTAL_UANG']); ?>
@@ -277,7 +282,7 @@ $active_page = 'laporan';
                             <?php endwhile; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="15" class="text-center text-muted">Tidak ada data stock opname pada periode yang dipilih</td>
+                                <td colspan="16" class="text-center text-muted">Tidak ada data stock opname pada periode yang dipilih</td>
                             </tr>
                         <?php endif; ?>
                     </tbody>

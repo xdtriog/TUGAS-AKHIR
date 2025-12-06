@@ -79,35 +79,22 @@ $stmt_expired->bind_param("ss", $kd_barang, $kd_lokasi);
 $stmt_expired->execute();
 $result_expired = $stmt_expired->get_result();
 
-// Format tanggal Indonesia
+// Format tanggal (dd/mm/yyyy)
 function formatTanggal($tanggal) {
     if (empty($tanggal) || $tanggal == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    return $date->format('d/m/Y');
 }
 
-// Format tanggal dan waktu Indonesia
+// Format tanggal dan waktu (dd/mm/yyyy HH:ii WIB)
 function formatTanggalWaktu($tanggal) {
     if (empty($tanggal) || $tanggal == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($tanggal);
-    $tanggal_formatted = $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
-    $waktu_formatted = $date->format('H:i') . ' WIB';
-    
-    return $tanggal_formatted . ' ' . $waktu_formatted;
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Format rupiah

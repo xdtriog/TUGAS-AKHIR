@@ -22,7 +22,7 @@ if (empty($id_transfer)) {
     exit();
 }
 
-// Query untuk mendapatkan data surat jalan (semua detail transfer dengan ID_TRANSFER_BARANG yang sama)
+// Query untuk mendapatkan data surat jalan dengan batch (semua detail transfer dengan ID_TRANSFER_BARANG yang sama)
 $query_surat_jalan = "SELECT 
     tb.ID_TRANSFER_BARANG,
     tb.WAKTU_PESAN_TRANSFER,
@@ -40,7 +40,12 @@ $query_surat_jalan = "SELECT
     ml_asal.NAMA_LOKASI as NAMA_LOKASI_ASAL,
     ml_asal.ALAMAT_LOKASI as ALAMAT_LOKASI_ASAL,
     ml_tujuan.NAMA_LOKASI as NAMA_LOKASI_TUJUAN,
-    ml_tujuan.ALAMAT_LOKASI as ALAMAT_LOKASI_TUJUAN
+    ml_tujuan.ALAMAT_LOKASI as ALAMAT_LOKASI_TUJUAN,
+    GROUP_CONCAT(
+        CONCAT(dtbb.ID_DETAIL_TRANSFER_BARANG_BATCH, ':', pb.ID_PESAN_BARANG, ':', dtbb.JUMLAH_PESAN_TRANSFER_BATCH_DUS, ':', COALESCE(pb.TGL_EXPIRED, ''))
+        ORDER BY pb.TGL_EXPIRED ASC
+        SEPARATOR '|'
+    ) as BATCH_INFO
 FROM TRANSFER_BARANG tb
 INNER JOIN DETAIL_TRANSFER_BARANG dtb ON tb.ID_TRANSFER_BARANG = dtb.ID_TRANSFER_BARANG
 INNER JOIN MASTER_BARANG mb ON dtb.KD_BARANG = mb.KD_BARANG
@@ -48,7 +53,13 @@ LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
 LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
 LEFT JOIN MASTER_LOKASI ml_asal ON tb.KD_LOKASI_ASAL = ml_asal.KD_LOKASI
 LEFT JOIN MASTER_LOKASI ml_tujuan ON tb.KD_LOKASI_TUJUAN = ml_tujuan.KD_LOKASI
+LEFT JOIN DETAIL_TRANSFER_BARANG_BATCH dtbb ON dtb.ID_DETAIL_TRANSFER_BARANG = dtbb.ID_DETAIL_TRANSFER_BARANG
+LEFT JOIN PESAN_BARANG pb ON dtbb.ID_PESAN_BARANG = pb.ID_PESAN_BARANG
 WHERE tb.ID_TRANSFER_BARANG = ?
+GROUP BY tb.ID_TRANSFER_BARANG, tb.WAKTU_PESAN_TRANSFER, dtb.ID_DETAIL_TRANSFER_BARANG, dtb.KD_BARANG,
+         dtb.TOTAL_PESAN_TRANSFER_DUS, dtb.TOTAL_KIRIM_DUS, dtb.STATUS, tb.KD_LOKASI_ASAL, tb.KD_LOKASI_TUJUAN,
+         mb.NAMA_BARANG, mb.BERAT, mm.NAMA_MEREK, mk.NAMA_KATEGORI, ml_asal.NAMA_LOKASI, ml_asal.ALAMAT_LOKASI,
+         ml_tujuan.NAMA_LOKASI, ml_tujuan.ALAMAT_LOKASI
 ORDER BY 
     CASE 
         WHEN dtb.STATUS = 'DIPESAN' THEN 1
@@ -328,6 +339,7 @@ while ($row = $result_surat->fetch_assoc()) {
                     <th>Nama Barang</th>
                     <th>Berat (gr)</th>
                     <th>Jumlah (dus)</th>
+                    <th>Batch</th>
                     <th>Status</th>
                 </tr>
             </thead>
@@ -344,6 +356,34 @@ while ($row = $result_surat->fetch_assoc()) {
                         <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
                         <td><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
                         <td><?php echo number_format($row['TOTAL_PESAN_TRANSFER_DUS'], 0, ',', '.'); ?></td>
+                        <td>
+                            <?php 
+                            if (!empty($row['BATCH_INFO'])) {
+                                $batches = explode('|', $row['BATCH_INFO']);
+                                echo '<div style="font-size: 11px;">';
+                                foreach ($batches as $batch_str) {
+                                    $batch_parts = explode(':', $batch_str);
+                                    if (count($batch_parts) >= 3) {
+                                        $id_pesan = htmlspecialchars($batch_parts[1]);
+                                        $jumlah_dus = number_format(intval($batch_parts[2]), 0, ',', '.');
+                                        $tgl_expired = !empty($batch_parts[3]) ? htmlspecialchars($batch_parts[3]) : '-';
+                                        
+                                        echo '<div style="margin-bottom: 5px; padding: 3px; border: 1px solid #ddd; border-radius: 3px;">';
+                                        echo '<strong>' . $id_pesan . '</strong><br>';
+                                        echo 'Jumlah: ' . $jumlah_dus . ' dus';
+                                        if ($tgl_expired != '-') {
+                                            $date_expired = new DateTime($tgl_expired);
+                                            echo '<br>Exp: ' . $date_expired->format('d/m/Y');
+                                        }
+                                        echo '</div>';
+                                    }
+                                }
+                                echo '</div>';
+                            } else {
+                                echo '-';
+                            }
+                            ?>
+                        </td>
                         <td>
                             <?php if ($is_cancelled): ?>
                                 <span class="status-badge dibatalkan">Dibatalkan</span>

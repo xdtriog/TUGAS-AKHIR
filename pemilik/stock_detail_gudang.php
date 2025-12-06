@@ -586,7 +586,8 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
             $maxAttempts = 100;
             $attempt = 0;
             do {
-                $id_interval_poq = ShortIdGenerator::generate(16, '');
+                $uuid = ShortIdGenerator::generate(12, '');
+                $id_interval_poq = 'IPOQ' . $uuid;
                 $attempt++;
                 if (!checkUUIDExists($conn, 'PERHITUNGAN_INTERVAL_POQ', 'ID_PERHITUNGAN_INTERVAL_POQ', $id_interval_poq)) {
                     break;
@@ -612,7 +613,8 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $maxAttempts = 100;
         $attempt = 0;
         do {
-            $id_kuantitas_poq = ShortIdGenerator::generate(16, '');
+            $uuid = ShortIdGenerator::generate(12, '');
+            $id_kuantitas_poq = 'KPOQ' . $uuid;
             $attempt++;
             if (!checkUUIDExists($conn, 'PERHITUNGAN_KUANTITAS_POQ', 'ID_PERHITUNGAN_KUANTITAS_POQ', $id_kuantitas_poq)) {
                 break;
@@ -639,7 +641,8 @@ if (isset($_POST['action']) && $_POST['action'] == 'simpan_dan_pesan_poq') {
         $maxAttempts = 100;
         $attempt = 0;
         do {
-            $id_pesan_barang = ShortIdGenerator::generate(16, '');
+            $uuid = ShortIdGenerator::generate(12, '');
+            $id_pesan_barang = 'PSBG' . $uuid;
             $attempt++;
             if (!checkUUIDExists($conn, 'PESAN_BARANG', 'ID_PESAN_BARANG', $id_pesan_barang)) {
                 break;
@@ -717,11 +720,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action'])) {
         
         if (!empty($kd_barang) && !empty($kd_lokasi) && !empty($kd_supplier) && $jumlah_dipesan > 0) {
             // Generate ID_PESAN_BARANG UUID (16 karakter, tanpa prefix)
-            // Pattern: generate > check > pass, generate > check (duplikat) > generate > check > pass
+            // Generate ID_PESAN_BARANG dengan format PSBG+UUID (total 16 karakter: PSBG=4, UUID=12)
             $maxAttempts = 100;
             $attempt = 0;
             do {
-                $id_pesan_barang = ShortIdGenerator::generate(16, '');
+                $uuid = ShortIdGenerator::generate(12, '');
+                $id_pesan_barang = 'PSBG' . $uuid;
                 $attempt++;
                 if (!checkUUIDExists($conn, 'PESAN_BARANG', 'ID_PESAN_BARANG', $id_pesan_barang)) {
                     break; // UUID unique, keluar dari loop
@@ -864,32 +868,22 @@ $result_stock = $stmt_stock->get_result();
     }
 }
 
-// Format tanggal Indonesia
+// Format tanggal (dd/mm/yyyy)
 function formatTanggal($tanggal) {
     if (empty($tanggal) || $tanggal == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    return $date->format('d/m/Y');
 }
 
-// Format tanggal dan waktu Indonesia (untuk Terakhir Update)
+// Format tanggal dan waktu (dd/mm/yyyy HH:ii WIB)
 function formatTanggalWaktu($tanggal) {
     if (empty($tanggal) || $tanggal == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y') . ' ' . $date->format('H:i') . ' WIB';
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Set active page untuk sidebar

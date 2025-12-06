@@ -117,6 +117,8 @@ def generate_stock_history_from_all(csv_file, table_name, tipe_perubahan, sql_fi
 def main():
     """Main function"""
     output_file = 'Insert Dummy.sql'
+    KD_BARANG = 'W8r1LuGwd932W3Zq'
+    SATUAN_PERDUS = 10  # 10 pieces per dus (sesuai dengan MASTER_BARANG untuk W8r1LuGwd932W3Zq)
     
     # Urutan import sesuai README
     files_to_import = [
@@ -139,7 +141,7 @@ def main():
     with open(output_file, 'w', encoding='utf-8') as sql_file:
         # Write header
         sql_file.write("-- ============================================\n")
-        sql_file.write("-- INSERT DUMMY DATA untuk Barang 4aCSBjQPd3TzFd90\n")
+        sql_file.write(f"-- INSERT DUMMY DATA untuk Barang {KD_BARANG}\n")
         sql_file.write("-- Generated from CSV files\n")
         sql_file.write("-- ============================================\n\n")
         sql_file.write("-- Urutan import:\n")
@@ -198,7 +200,6 @@ def main():
                 pesan_rows = list(reader)
             
             if pesan_rows:
-                SATUAN_PERDUS = 25  # 25 pieces per dus (sesuai dengan MASTER_BARANG untuk 4aCSBjQPd3TzFd90)
                 total_harga_quantity = 0
                 total_quantity = 0
                 
@@ -218,7 +219,7 @@ def main():
                     sql_file.write("-- Formula: AVG_HARGA_BELI_PIECES = SUM(HARGA_PESAN_BARANG_DUS * TOTAL_MASUK_DUS) / SUM(TOTAL_MASUK_DUS * SATUAN_PERDUS)\n")
                     sql_file.write(f"UPDATE MASTER_BARANG \n")
                     sql_file.write(f"SET AVG_HARGA_BELI_PIECES = {avg_harga_beli:.2f}\n")
-                    sql_file.write(f"WHERE KD_BARANG = '4aCSBjQPd3TzFd90';\n\n")
+                    sql_file.write(f"WHERE KD_BARANG = '{KD_BARANG}';\n\n")
         
         # ===== SUMMARY DATA DUMMY =====
         sql_file.write("-- ============================================\n")
@@ -232,7 +233,7 @@ def main():
         sql_file.write("    JUMLAH_BARANG as STOCK_AKHIR,\n")
         sql_file.write("    SATUAN\n")
         sql_file.write("FROM STOCK\n")
-        sql_file.write("WHERE KD_BARANG = '4aCSBjQPd3TzFd90' AND KD_LOKASI = 'NRb2W8VG'\n")
+        sql_file.write(f"WHERE KD_BARANG = '{KD_BARANG}' AND KD_LOKASI = 'GDNGj825'\n")
         sql_file.write("UNION ALL\n")
         sql_file.write("SELECT \n")
         sql_file.write("    'STOCK TOKO' as LOKASI,\n")
@@ -241,7 +242,7 @@ def main():
         sql_file.write("    JUMLAH_BARANG as STOCK_AKHIR,\n")
         sql_file.write("    SATUAN\n")
         sql_file.write("FROM STOCK\n")
-        sql_file.write("WHERE KD_BARANG = '4aCSBjQPd3TzFd90' AND KD_LOKASI = 'NsHmYgfe';\n\n")
+        sql_file.write(f"WHERE KD_BARANG = '{KD_BARANG}' AND KD_LOKASI = 'TOKOeLig';\n\n")
         sql_file.write("-- Verifikasi AVG_HARGA_BELI_PIECES Akhir\n")
         sql_file.write("SELECT \n")
         sql_file.write("    KD_BARANG, \n")
@@ -249,10 +250,11 @@ def main():
         sql_file.write("    AVG_HARGA_BELI_PIECES as AVG_HARGA_BELI_PIECES_AKHIR,\n")
         sql_file.write("    SATUAN_PERDUS\n")
         sql_file.write("FROM MASTER_BARANG\n")
-        sql_file.write("WHERE KD_BARANG = '4aCSBjQPd3TzFd90';\n")
+        sql_file.write(f"WHERE KD_BARANG = '{KD_BARANG}';\n")
     
     print(f"\n✓ SQL file generated: {output_file}")
     print(f"✓ Total records: {total_records}")
 
 if __name__ == '__main__':
     main()
+

@@ -358,7 +358,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                     // Insert ke STOCK_HISTORY dengan REF = ID_TRANSFER_BARANG
                     $id_history = '';
                     do {
-                        $id_history = ShortIdGenerator::generate(16, '');
+                        // Generate ID_HISTORY_STOCK dengan format SKHY+UUID (total 16 karakter: SKHY=4, UUID=12)
+                        $uuid = ShortIdGenerator::generate(12, '');
+                        $id_history = 'SKHY' . $uuid;
                     } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
                     
                     $jumlah_perubahan = -$jumlah_kirim_pieces; // Negatif karena mengurangi stock
@@ -517,23 +519,16 @@ $stmt_transfer->bind_param("s", $kd_lokasi);
 $stmt_transfer->execute();
 $result_transfer = $stmt_transfer->get_result();
 
-// Format waktu stack
+// Format waktu stack (dd/mm/yyyy HH:ii WIB)
 function formatWaktuStack($waktu_pesan, $waktu_kirim, $waktu_selesai, $status) {
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
     $html = '<div class="d-flex flex-column gap-1">';
     
     // Waktu diterima (jika status SELESAI) - tampilkan di atas
     if (!empty($waktu_selesai) && $status == 'SELESAI') {
         $date_sampai = new DateTime($waktu_selesai);
-        $tanggal_sampai = $date_sampai->format('d') . ' ' . $bulan[(int)$date_sampai->format('m')] . ' ' . $date_sampai->format('Y');
-        $waktu_sampai_formatted = $date_sampai->format('H:i') . ' WIB';
+        $waktu_sampai_formatted = $date_sampai->format('d/m/Y H:i') . ' WIB';
         $html .= '<div>';
-        $html .= htmlspecialchars($tanggal_sampai . ' ' . $waktu_sampai_formatted) . ' ';
+        $html .= htmlspecialchars($waktu_sampai_formatted) . ' ';
         $html .= '<span class="badge bg-success">DITERIMA</span>';
         $html .= '</div>';
     }
@@ -541,10 +536,9 @@ function formatWaktuStack($waktu_pesan, $waktu_kirim, $waktu_selesai, $status) {
     // Waktu Dikirim (jika ada)
     if (!empty($waktu_kirim)) {
         $date_kirim = new DateTime($waktu_kirim);
-        $tanggal_kirim = $date_kirim->format('d') . ' ' . $bulan[(int)$date_kirim->format('m')] . ' ' . $date_kirim->format('Y');
-        $waktu_kirim_formatted = $date_kirim->format('H:i') . ' WIB';
+        $waktu_kirim_formatted = $date_kirim->format('d/m/Y H:i') . ' WIB';
         $html .= '<div>';
-        $html .= htmlspecialchars($tanggal_kirim . ' ' . $waktu_kirim_formatted) . ' ';
+        $html .= htmlspecialchars($waktu_kirim_formatted) . ' ';
         $html .= '<span class="badge bg-info">DIKIRIM</span>';
         $html .= '</div>';
     }
@@ -552,10 +546,9 @@ function formatWaktuStack($waktu_pesan, $waktu_kirim, $waktu_selesai, $status) {
     // Waktu dipesan - tampilkan di bawah
     if (!empty($waktu_pesan)) {
         $date_pesan = new DateTime($waktu_pesan);
-        $tanggal_pesan = $date_pesan->format('d') . ' ' . $bulan[(int)$date_pesan->format('m')] . ' ' . $date_pesan->format('Y');
-        $waktu_pesan_formatted = $date_pesan->format('H:i') . ' WIB';
+        $waktu_pesan_formatted = $date_pesan->format('d/m/Y H:i') . ' WIB';
         $html .= '<div>';
-        $html .= htmlspecialchars($tanggal_pesan . ' ' . $waktu_pesan_formatted) . ' ';
+        $html .= htmlspecialchars($waktu_pesan_formatted) . ' ';
         $html .= '<span class="badge bg-warning">DIPESAN</span>';
         $html .= '</div>';
     }

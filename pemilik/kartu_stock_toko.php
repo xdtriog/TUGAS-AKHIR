@@ -136,7 +136,7 @@ if (!empty($kd_barang)) {
         LEFT JOIN USERS u ON sh.UPDATED_BY = u.ID_USERS
         WHERE sh.KD_BARANG = ? AND sh.KD_LOKASI = ?
         AND sh.WAKTU_CHANGE >= ? AND sh.WAKTU_CHANGE < ?
-        ORDER BY sh.WAKTU_CHANGE ASC, sh.ID_HISTORY_STOCK ASC";
+        ORDER BY sh.WAKTU_CHANGE DESC, sh.ID_HISTORY_STOCK DESC";
         
         $stmt_history = $conn->prepare($query_history);
         $tanggal_dari_datetime = $tanggal_dari . ' 00:00:00';
@@ -150,22 +150,22 @@ if (!empty($kd_barang)) {
     }
 }
 
-// Format tanggal
+// Format tanggal (dd/mm/yyyy)
 function formatTanggal($tanggal) {
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
+    if (empty($tanggal) || $tanggal == null) {
+        return '-';
+    }
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    return $date->format('d/m/Y');
 }
 
-// Format waktu
+// Format waktu (dd/mm/yyyy HH:ii WIB)
 function formatWaktu($waktu) {
+    if (empty($waktu) || $waktu == null) {
+        return '-';
+    }
     $date = new DateTime($waktu);
-    return $date->format('d/m/Y H:i');
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Format tipe perubahan
@@ -385,7 +385,7 @@ $active_page = 'laporan';
                             ?>
                                 <?php foreach ($stock_history as $h): ?>
                                     <tr>
-                                        <td><?php echo formatWaktu($h['WAKTU_CHANGE']); ?></td>
+                            <td data-order="<?php echo strtotime($h['WAKTU_CHANGE']); ?>"><?php echo formatWaktu($h['WAKTU_CHANGE']); ?></td>
                                         <td>
                                             <span class="badge 
                                                 <?php 
@@ -450,7 +450,7 @@ $active_page = 'laporan';
                 },
                 pageLength: 25,
                 lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "Semua"]],
-                order: [[0, 'asc']], // Sort by Tanggal ascending
+                order: [[0, 'desc']], // Sort by Tanggal descending
                 scrollX: true,
                 responsive: true,
                 drawCallback: function(settings) {

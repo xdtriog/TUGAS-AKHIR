@@ -72,9 +72,9 @@ $result_mutasi = $stmt_mutasi->get_result();
 $query_summary = "SELECT 
     COUNT(DISTINCT mbr.ID_MUTASI_BARANG_RUSAK) as TOTAL_MUTASI,
     COUNT(DISTINCT mbr.KD_BARANG) as TOTAL_BARANG,
-    COALESCE(SUM(ABS(mbr.JUMLAH_MUTASI_DUS)), 0) as TOTAL_MUTASI_DUS,
-    COALESCE(SUM(ABS(mbr.TOTAL_BARANG_PIECES)), 0) as TOTAL_MUTASI_PIECES,
-    COALESCE(SUM(ABS(mbr.TOTAL_UANG)), 0) as TOTAL_NILAI_MUTASI
+    COALESCE(SUM(mbr.JUMLAH_MUTASI_DUS), 0) as TOTAL_MUTASI_DUS,
+    COALESCE(SUM(mbr.TOTAL_BARANG_PIECES), 0) as TOTAL_MUTASI_PIECES,
+    COALESCE(SUM(mbr.TOTAL_UANG), 0) as TOTAL_NILAI_MUTASI
 FROM MUTASI_BARANG_RUSAK mbr
 WHERE mbr.KD_LOKASI = ?
 AND DATE(mbr.WAKTU_MUTASI) BETWEEN ? AND ?";
@@ -85,32 +85,22 @@ $stmt_summary->execute();
 $result_summary = $stmt_summary->get_result();
 $summary = $result_summary->fetch_assoc();
 
-// Format tanggal
+// Format tanggal (dd/mm/yyyy)
 function formatTanggal($tanggal) {
     if (empty($tanggal) || $tanggal == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    return $date->format('d/m/Y');
 }
 
-// Format waktu
+// Format waktu (dd/mm/yyyy HH:ii WIB)
 function formatWaktu($waktu) {
     if (empty($waktu) || $waktu == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($waktu);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y') . ' ' . $date->format('H:i') . ' WIB';
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Format rupiah
@@ -245,14 +235,16 @@ function formatTanggalExpired($tanggal) {
         table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
-            font-size: 11px;
+            margin-bottom: 16px;
+            font-size: 10.5px;
+            table-layout: fixed;
         }
         
         table th, table td {
             border: 1px solid #000;
-            padding: 8px;
+            padding: 6px;
             text-align: left;
+            word-wrap: break-word;
         }
         
         table th {
@@ -324,11 +316,15 @@ function formatTanggalExpired($tanggal) {
                 <div class="label">Total Barang</div>
             </div>
             <div class="summary-card">
-                <div class="value"><?php echo number_format($summary['TOTAL_MUTASI_DUS'], 0, ',', '.'); ?></div>
+                <div class="value">
+                    <?php echo ($summary['TOTAL_MUTASI_DUS'] > 0 ? '+' : '') . number_format($summary['TOTAL_MUTASI_DUS'], 0, ',', '.'); ?>
+                </div>
                 <div class="label">Total Mutasi (Dus)</div>
             </div>
             <div class="summary-card">
-                <div class="value"><?php echo formatRupiah($summary['TOTAL_NILAI_MUTASI']); ?></div>
+                <div class="value">
+                    <?php echo formatRupiah($summary['TOTAL_NILAI_MUTASI']); ?>
+                </div>
                 <div class="label">Total Nilai Mutasi</div>
             </div>
         </div>
@@ -347,6 +343,7 @@ function formatTanggalExpired($tanggal) {
                     <th style="width: 7%;">Tanggal Expired</th>
                     <th style="width: 8%;">Supplier</th>
                     <th style="width: 5%;" class="text-center">Jumlah Mutasi (Dus)</th>
+                    <th style="width: 4%;" class="text-center">Satuan per Dus</th>
                     <th style="width: 5%;" class="text-center">Jumlah Mutasi (Pieces)</th>
                     <th style="width: 6%;" class="text-right">Harga (Rp/Piece)</th>
                     <th style="width: 8%;" class="text-right">Total Nilai Mutasi</th>
@@ -370,16 +367,17 @@ function formatTanggalExpired($tanggal) {
                             <td><?php echo htmlspecialchars($row['ID_PESAN_BARANG'] ?? '-'); ?></td>
                             <td><?php echo formatTanggalExpired($row['TGL_EXPIRED'] ?? null); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_SUPPLIER']); ?></td>
-                            <td class="text-center"><?php echo number_format(abs($row['JUMLAH_MUTASI_DUS']), 0, ',', '.'); ?></td>
-                            <td class="text-center"><?php echo number_format(abs($row['TOTAL_BARANG_PIECES']), 0, ',', '.'); ?></td>
+                            <td class="text-center"><?php echo ($row['JUMLAH_MUTASI_DUS'] > 0 ? '+' : '') . number_format($row['JUMLAH_MUTASI_DUS'], 0, ',', '.'); ?></td>
+                            <td class="text-center"><?php echo number_format($row['SATUAN_PERDUS'], 0, ',', '.'); ?></td>
+                            <td class="text-center"><?php echo ($row['TOTAL_BARANG_PIECES'] > 0 ? '+' : '') . number_format($row['TOTAL_BARANG_PIECES'], 0, ',', '.'); ?></td>
                             <td class="text-right"><?php echo formatRupiah($row['HARGA_BARANG_PIECES']); ?></td>
-                            <td class="text-right"><?php echo formatRupiah(abs($row['TOTAL_UANG'])); ?></td>
+                            <td class="text-right"><?php echo formatRupiah($row['TOTAL_UANG']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_USER'] ?? '-'); ?></td>
                         </tr>
                     <?php endwhile; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="15" class="text-center">Tidak ada data mutasi barang rusak pada periode yang dipilih</td>
+                        <td colspan="16" class="text-center">Tidak ada data mutasi barang rusak pada periode yang dipilih</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
@@ -388,8 +386,8 @@ function formatTanggalExpired($tanggal) {
         <div class="footer-summary">
             <p><strong>Total Mutasi: <?php echo number_format($summary['TOTAL_MUTASI'], 0, ',', '.'); ?></strong></p>
             <p><strong>Total Barang: <?php echo number_format($summary['TOTAL_BARANG'], 0, ',', '.'); ?></strong></p>
-            <p><strong>Total Mutasi (Dus): <?php echo number_format($summary['TOTAL_MUTASI_DUS'], 0, ',', '.'); ?></strong></p>
-            <p><strong>Total Mutasi (Pieces): <?php echo number_format($summary['TOTAL_MUTASI_PIECES'], 0, ',', '.'); ?></strong></p>
+            <p><strong>Total Mutasi (Dus): <?php echo ($summary['TOTAL_MUTASI_DUS'] > 0 ? '+' : '') . number_format($summary['TOTAL_MUTASI_DUS'], 0, ',', '.'); ?></strong></p>
+            <p><strong>Total Mutasi (Pieces): <?php echo ($summary['TOTAL_MUTASI_PIECES'] > 0 ? '+' : '') . number_format($summary['TOTAL_MUTASI_PIECES'], 0, ',', '.'); ?></strong></p>
             <p class="total">Total Nilai Mutasi: <?php echo formatRupiah($summary['TOTAL_NILAI_MUTASI']); ?></p>
         </div>
         

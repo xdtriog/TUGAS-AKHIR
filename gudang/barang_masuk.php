@@ -257,7 +257,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             require_once '../includes/uuid_generator.php';
             $id_history = '';
             do {
-                $id_history = ShortIdGenerator::generate(16, '');
+                // Generate ID_HISTORY_STOCK dengan format SKHY+UUID (total 16 karakter: SKHY=4, UUID=12)
+                $uuid = ShortIdGenerator::generate(12, '');
+                $id_history = 'SKHY' . $uuid;
             } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
             
             $insert_history = "INSERT INTO STOCK_HISTORY 
@@ -391,40 +393,25 @@ $stmt_barang_masuk->bind_param("s", $kd_lokasi);
 $stmt_barang_masuk->execute();
 $result_barang_masuk = $stmt_barang_masuk->get_result();
 
-// Format tanggal dan waktu Indonesia
+// Format tanggal dan waktu (dd/mm/yyyy HH:ii WIB)
 function formatTanggalWaktu($tanggal) {
     if (empty($tanggal) || $tanggal == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($tanggal);
-    $tanggal_formatted = $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
-    $waktu_formatted = $date->format('H:i') . ' WIB';
-    
-    return $tanggal_formatted . ' ' . $waktu_formatted;
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
-// Format waktu dengan badge untuk kolom waktu (stack)
+// Format waktu dengan badge untuk kolom waktu (stack) (dd/mm/yyyy HH:ii WIB)
 function formatWaktuStack($waktu_pesan, $waktu_estimasi, $waktu_sampai, $status) {
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
     $html = '<div class="d-flex flex-column gap-1">';
     
     // Waktu diterima (jika ada WAKTU_SELESAI dan status SELESAI) - tampilkan di atas
     if (!empty($waktu_sampai) && $status == 'SELESAI') {
         $date_sampai = new DateTime($waktu_sampai);
-        $tanggal_sampai = $date_sampai->format('d') . ' ' . $bulan[(int)$date_sampai->format('m')] . ' ' . $date_sampai->format('Y');
-        $waktu_sampai_formatted = $date_sampai->format('H:i') . ' WIB';
+        $waktu_sampai_formatted = $date_sampai->format('d/m/Y H:i') . ' WIB';
         $html .= '<div>';
-        $html .= htmlspecialchars($tanggal_sampai . ' ' . $waktu_sampai_formatted) . ' ';
+        $html .= htmlspecialchars($waktu_sampai_formatted) . ' ';
         $html .= '<span class="badge bg-success">DITERIMA</span>';
         $html .= '</div>';
     }
@@ -432,10 +419,9 @@ function formatWaktuStack($waktu_pesan, $waktu_estimasi, $waktu_sampai, $status)
     // Waktu estimasi - tampilkan di tengah (jika ada)
     if (!empty($waktu_estimasi)) {
         $date_estimasi = new DateTime($waktu_estimasi);
-        $tanggal_estimasi = $date_estimasi->format('d') . ' ' . $bulan[(int)$date_estimasi->format('m')] . ' ' . $date_estimasi->format('Y');
-        $waktu_estimasi_formatted = $date_estimasi->format('H:i') . ' WIB';
+        $waktu_estimasi_formatted = $date_estimasi->format('d/m/Y H:i') . ' WIB';
         $html .= '<div>';
-        $html .= htmlspecialchars($tanggal_estimasi . ' ' . $waktu_estimasi_formatted) . ' ';
+        $html .= htmlspecialchars($waktu_estimasi_formatted) . ' ';
         $html .= '<span class="badge bg-info">ESTIMASI</span>';
         $html .= '</div>';
     }
@@ -443,10 +429,9 @@ function formatWaktuStack($waktu_pesan, $waktu_estimasi, $waktu_sampai, $status)
     // Waktu dipesan - tampilkan di bawah
     if (!empty($waktu_pesan)) {
         $date_pesan = new DateTime($waktu_pesan);
-        $tanggal_pesan = $date_pesan->format('d') . ' ' . $bulan[(int)$date_pesan->format('m')] . ' ' . $date_pesan->format('Y');
-        $waktu_pesan_formatted = $date_pesan->format('H:i') . ' WIB';
+        $waktu_pesan_formatted = $date_pesan->format('d/m/Y H:i') . ' WIB';
         $html .= '<div>';
-        $html .= htmlspecialchars($tanggal_pesan . ' ' . $waktu_pesan_formatted) . ' ';
+        $html .= htmlspecialchars($waktu_pesan_formatted) . ' ';
         $html .= '<span class="badge bg-warning">DIPESAN</span>';
         $html .= '</div>';
     }

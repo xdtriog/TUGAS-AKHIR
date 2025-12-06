@@ -515,11 +515,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     $conn->begin_transaction();
     
     try {
-        // Generate ID transfer
+        // Generate ID transfer dengan prefix TRFR (format: TRFR+UUID, 16 karakter: TRFR=4, UUID=12)
         require_once '../includes/uuid_generator.php';
         $id_transfer = '';
         do {
-            $id_transfer = ShortIdGenerator::generate(16, '');
+            $id_transfer = ShortIdGenerator::generate(12, 'TRFR');
         } while (checkUUIDExists($conn, 'TRANSFER_BARANG', 'ID_TRANSFER_BARANG', $id_transfer));
         
         // Insert TRANSFER_BARANG
@@ -581,10 +581,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 }
             }
             
-            // Generate ID detail transfer
+            // Generate ID detail transfer dengan prefix DTFR (format: DTFR+UUID, 16 karakter: DTFR=4, UUID=12)
             $id_detail = '';
             do {
-                $id_detail = ShortIdGenerator::generate(16, '');
+                $id_detail = ShortIdGenerator::generate(12, 'DTFR');
             } while (checkUUIDExists($conn, 'DETAIL_TRANSFER_BARANG', 'ID_DETAIL_TRANSFER_BARANG', $id_detail));
             
             $insert_detail = "INSERT INTO DETAIL_TRANSFER_BARANG 
@@ -608,10 +608,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                     continue;
                 }
                 
-                // Generate ID detail transfer batch
+                // Generate ID detail transfer batch dengan prefix DTFB (format: DTFB+UUID, 16 karakter: DTFB=4, UUID=12)
                 $id_detail_batch = '';
                 do {
-                    $id_detail_batch = ShortIdGenerator::generate(16, '');
+                    $id_detail_batch = ShortIdGenerator::generate(12, 'DTFB');
                 } while (checkUUIDExists($conn, 'DETAIL_TRANSFER_BARANG_BATCH', 'ID_DETAIL_TRANSFER_BARANG_BATCH', $id_detail_batch));
                 
                 $insert_detail_batch = "INSERT INTO DETAIL_TRANSFER_BARANG_BATCH 
@@ -705,21 +705,13 @@ if ($stmt_stock === false) {
     $result_stock = $stmt_stock->get_result();
 }
 
-// Format tanggal dan waktu Indonesia
+// Format tanggal dan waktu (dd/mm/yyyy HH:ii WIB)
 function formatTanggalWaktu($tanggal) {
     if (empty($tanggal) || $tanggal == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($tanggal);
-    $tanggal_formatted = $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
-    $waktu_formatted = $date->format('H:i') . ' WIB';
-    
-    return $tanggal_formatted . ' ' . $waktu_formatted;
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Set active page untuk sidebar

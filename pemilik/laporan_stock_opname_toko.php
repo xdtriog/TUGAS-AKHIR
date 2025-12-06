@@ -94,22 +94,22 @@ function formatRupiah($angka) {
     return "Rp. " . number_format($angka, 0, ',', '.');
 }
 
-// Format tanggal
+// Format tanggal (dd/mm/yyyy)
 function formatTanggal($tanggal) {
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
+    if (empty($tanggal) || $tanggal == null) {
+        return '-';
+    }
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    return $date->format('d/m/Y');
 }
 
-// Format waktu
+// Format waktu (dd/mm/yyyy HH:ii WIB)
 function formatWaktu($waktu) {
+    if (empty($waktu) || $waktu == null) {
+        return '-';
+    }
     $date = new DateTime($waktu);
-    return $date->format('d/m/Y H:i');
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Set active page untuk sidebar
@@ -203,10 +203,10 @@ $active_page = 'laporan';
                             <th>Merek</th>
                             <th>Kategori</th>
                             <th>Nama Barang</th>
-                            <th>Jumlah Sistem</th>
-                            <th>Jumlah Sebenarnya</th>
-                            <th>Selisih</th>
-                            <th>Satuan</th>
+                            <th>Jumlah Sistem (pieces)</th>
+                            <th>Jumlah Sebenarnya (pieces)</th>
+                            <th>Selisih (pieces)</th>
+                            <th>Harga (Rp/Piece)</th>
                             <th>Total Nilai Selisih</th>
                             <th>User</th>
                         </tr>
@@ -215,7 +215,7 @@ $active_page = 'laporan';
                         <?php if ($result_opname && $result_opname->num_rows > 0): ?>
                             <?php while ($row = $result_opname->fetch_assoc()): ?>
                                 <tr>
-                                    <td><?php echo formatWaktu($row['WAKTU_OPNAME']); ?></td>
+                                    <td data-order="<?php echo strtotime($row['WAKTU_OPNAME']); ?>"><?php echo formatWaktu($row['WAKTU_OPNAME']); ?></td>
                                     <td><?php echo htmlspecialchars($row['ID_OPNAME']); ?></td>
                                     <td><?php echo htmlspecialchars($row['KD_BARANG']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
@@ -228,7 +228,7 @@ $active_page = 'laporan';
                                             <?php echo ($row['SELISIH'] > 0 ? '+' : '') . number_format($row['SELISIH'], 0, ',', '.'); ?>
                                         </span>
                                     </td>
-                                    <td><?php echo htmlspecialchars($row['SATUAN']); ?></td>
+                                    <td><?php echo formatRupiah($row['HARGA_BARANG_PIECES']); ?></td>
                                     <td>
                                         <span class="<?php echo $row['TOTAL_UANG'] < 0 ? 'text-danger' : ($row['TOTAL_UANG'] > 0 ? 'text-success' : 'text-muted'); ?> fw-bold">
                                             <?php echo formatRupiah($row['TOTAL_UANG']); ?>

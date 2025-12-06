@@ -52,7 +52,7 @@ $query_opname = "SELECT
     mb.NAMA_BARANG,
     COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
     COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
-    sh.REF as ID_PESAN_BARANG,
+    so.REF_BATCH as ID_PESAN_BARANG,
     pb.TGL_EXPIRED,
     COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER
 FROM STOCK_OPNAME so
@@ -60,11 +60,7 @@ INNER JOIN MASTER_BARANG mb ON so.KD_BARANG = mb.KD_BARANG
 LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
 LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
 LEFT JOIN USERS u ON so.ID_USERS = u.ID_USERS
-LEFT JOIN STOCK_HISTORY sh ON sh.KD_BARANG = so.KD_BARANG 
-    AND sh.KD_LOKASI = so.KD_LOKASI 
-    AND sh.TIPE_PERUBAHAN = 'OPNAME'
-    AND ABS(TIMESTAMPDIFF(SECOND, sh.WAKTU_CHANGE, so.WAKTU_OPNAME)) <= 5
-LEFT JOIN PESAN_BARANG pb ON sh.REF = pb.ID_PESAN_BARANG
+LEFT JOIN PESAN_BARANG pb ON so.REF_BATCH = pb.ID_PESAN_BARANG
 LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
 WHERE so.KD_LOKASI = ?
 AND DATE(so.WAKTU_OPNAME) BETWEEN ? AND ?
@@ -91,32 +87,22 @@ $stmt_summary->execute();
 $result_summary = $stmt_summary->get_result();
 $summary = $result_summary->fetch_assoc();
 
-// Format tanggal
+// Format tanggal (dd/mm/yyyy)
 function formatTanggal($tanggal) {
     if (empty($tanggal) || $tanggal == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    return $date->format('d/m/Y');
 }
 
-// Format waktu
+// Format waktu (dd/mm/yyyy HH:ii WIB)
 function formatWaktu($waktu) {
     if (empty($waktu) || $waktu == null) {
         return '-';
     }
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
     $date = new DateTime($waktu);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y') . ' ' . $date->format('H:i') . ' WIB';
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Format rupiah
@@ -251,14 +237,16 @@ function formatTanggalExpired($tanggal) {
         table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
-            font-size: 11px;
+            margin-bottom: 16px;
+            font-size: 10.5px;
+            table-layout: fixed;
         }
         
         table th, table td {
             border: 1px solid #000;
-            padding: 8px;
+            padding: 6px;
             text-align: left;
+            word-wrap: break-word;
         }
         
         table th {
@@ -352,10 +340,12 @@ function formatTanggalExpired($tanggal) {
                     <th style="width: 6%;">ID Batch</th>
                     <th style="width: 7%;">Tanggal Expired</th>
                     <th style="width: 8%;">Supplier</th>
-                    <th style="width: 5%;" class="text-center">Jumlah Sistem</th>
-                    <th style="width: 5%;" class="text-center">Jumlah Sebenarnya</th>
-                    <th style="width: 5%;" class="text-center">Selisih</th>
-                    <th style="width: 4%;" class="text-center">Satuan</th>
+                    <th style="width: 5%;" class="text-center">Jumlah Sistem (dus)</th>
+                    <th style="width: 5%;" class="text-center">Jumlah Sebenarnya (dus)</th>
+                    <th style="width: 5%;" class="text-center">Selisih (dus)</th>
+                    <th style="width: 4%;" class="text-center">Satuan per Dus</th>
+                    <th style="width: 5%;" class="text-center">Selisih (Pieces)</th>
+                    <th style="width: 6%;" class="text-right">Harga (Rp/Piece)</th>
                     <th style="width: 8%;" class="text-right">Total Nilai Selisih</th>
                     <th style="width: 8%;">User</th>
                 </tr>
@@ -380,14 +370,16 @@ function formatTanggalExpired($tanggal) {
                             <td class="text-center"><?php echo number_format($row['JUMLAH_SISTEM'], 0, ',', '.'); ?></td>
                             <td class="text-center"><?php echo number_format($row['JUMLAH_SEBENARNYA'], 0, ',', '.'); ?></td>
                             <td class="text-center"><?php echo ($row['SELISIH'] > 0 ? '+' : '') . number_format($row['SELISIH'], 0, ',', '.'); ?></td>
-                            <td class="text-center"><?php echo htmlspecialchars($row['SATUAN']); ?></td>
+                            <td class="text-center"><?php echo number_format($row['SATUAN_PERDUS'], 0, ',', '.'); ?></td>
+                            <td class="text-center"><?php echo ($row['TOTAL_BARANG_PIECES'] > 0 ? '+' : '') . number_format($row['TOTAL_BARANG_PIECES'], 0, ',', '.'); ?></td>
+                            <td class="text-right"><?php echo formatRupiah($row['HARGA_BARANG_PIECES']); ?></td>
                             <td class="text-right"><?php echo formatRupiah($row['TOTAL_UANG']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_USER'] ?? '-'); ?></td>
                         </tr>
                     <?php endwhile; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="16" class="text-center">Tidak ada data stock opname pada periode yang dipilih</td>
+                        <td colspan="17" class="text-center">Tidak ada data stock opname pada periode yang dipilih</td>
                     </tr>
                 <?php endif; ?>
             </tbody>

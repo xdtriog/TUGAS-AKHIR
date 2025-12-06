@@ -35,11 +35,9 @@ $data_bulan_ini = $result_bulan_ini->fetch_assoc();
 $total_barang_bulan_ini = $data_bulan_ini['total_barang'];
 
 // 3. Gross Profit bulan ini (hanya dari toko)
-// Gross Profit = (Harga Jual - Harga Beli) × Jumlah Barang
-$query_profit = "SELECT COALESCE(SUM((dnj.HARGA_JUAL_BARANG - COALESCE(mb.AVG_HARGA_BELI_PIECES, 0)) * dnj.JUMLAH_JUAL_BARANG), 0) as gross_profit
-                 FROM DETAIL_NOTA_JUAL dnj
-                 INNER JOIN NOTA_JUAL nj ON dnj.ID_NOTA_JUAL = nj.ID_NOTA_JUAL
-                 INNER JOIN MASTER_BARANG mb ON dnj.KD_BARANG = mb.KD_BARANG
+// Menggunakan GROSS_PROFIT yang sudah dihitung saat transaksi di NOTA_JUAL
+$query_profit = "SELECT COALESCE(SUM(nj.GROSS_PROFIT), 0) as gross_profit
+                 FROM NOTA_JUAL nj
                  INNER JOIN MASTER_LOKASI ml ON nj.KD_LOKASI = ml.KD_LOKASI
                  WHERE MONTH(nj.WAKTU_NOTA) = MONTH(CURDATE()) 
                  AND YEAR(nj.WAKTU_NOTA) = YEAR(CURDATE())

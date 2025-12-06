@@ -76,12 +76,13 @@ $stmt_mutasi->execute();
 $result_mutasi = $stmt_mutasi->get_result();
 
 // Query untuk mendapatkan summary
+// Untuk mutasi barang rusak, nilainya selalu negatif, jadi SUM akan menghasilkan nilai negatif
 $query_summary = "SELECT 
     COUNT(DISTINCT mbr.ID_MUTASI_BARANG_RUSAK) as TOTAL_MUTASI,
     COUNT(DISTINCT mbr.KD_BARANG) as TOTAL_BARANG,
-    COALESCE(SUM(ABS(mbr.JUMLAH_MUTASI_DUS)), 0) as TOTAL_MUTASI_DUS,
-    COALESCE(SUM(ABS(mbr.TOTAL_BARANG_PIECES)), 0) as TOTAL_MUTASI_PIECES,
-    COALESCE(SUM(ABS(mbr.TOTAL_UANG)), 0) as TOTAL_NILAI_MUTASI
+    COALESCE(SUM(mbr.JUMLAH_MUTASI_DUS), 0) as TOTAL_MUTASI_DUS,
+    COALESCE(SUM(mbr.TOTAL_BARANG_PIECES), 0) as TOTAL_MUTASI_PIECES,
+    COALESCE(SUM(mbr.TOTAL_UANG), 0) as TOTAL_NILAI_MUTASI
 FROM MUTASI_BARANG_RUSAK mbr
 WHERE mbr.KD_LOKASI = ?
 AND DATE(mbr.WAKTU_MUTASI) BETWEEN ? AND ?";
@@ -97,22 +98,22 @@ function formatRupiah($angka) {
     return "Rp. " . number_format($angka, 0, ',', '.');
 }
 
-// Format tanggal
+// Format tanggal (dd/mm/yyyy)
 function formatTanggal($tanggal) {
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
+    if (empty($tanggal) || $tanggal == null) {
+        return '-';
+    }
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    return $date->format('d/m/Y');
 }
 
-// Format waktu
+// Format waktu (dd/mm/yyyy HH:ii WIB)
 function formatWaktu($waktu) {
+    if (empty($waktu) || $waktu == null) {
+        return '-';
+    }
     $date = new DateTime($waktu);
-    return $date->format('d/m/Y H:i');
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Format tanggal expired dengan indikator
@@ -205,13 +206,21 @@ $active_page = 'laporan';
             </div>
             <div class="col-md-3">
                 <div class="stat-card warning">
-                    <div class="stat-value"><?php echo number_format($summary['TOTAL_MUTASI_DUS'], 0, ',', '.'); ?></div>
+                    <div class="stat-value">
+                        <span class="<?php echo $summary['TOTAL_MUTASI_DUS'] < 0 ? 'text-danger' : ($summary['TOTAL_MUTASI_DUS'] > 0 ? 'text-success' : 'text-muted'); ?> fw-bold">
+                            <?php echo ($summary['TOTAL_MUTASI_DUS'] > 0 ? '+' : '') . number_format($summary['TOTAL_MUTASI_DUS'], 0, ',', '.'); ?>
+                        </span>
+                    </div>
                     <div class="stat-label">Total Mutasi (Dus)</div>
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="stat-card danger">
-                    <div class="stat-value"><?php echo formatRupiah($summary['TOTAL_NILAI_MUTASI']); ?></div>
+                    <div class="stat-value">
+                        <span class="<?php echo $summary['TOTAL_NILAI_MUTASI'] < 0 ? 'text-danger' : ($summary['TOTAL_NILAI_MUTASI'] > 0 ? 'text-success' : 'text-muted'); ?> fw-bold">
+                            <?php echo formatRupiah($summary['TOTAL_NILAI_MUTASI']); ?>
+                        </span>
+                    </div>
                     <div class="stat-label">Total Nilai Mutasi</div>
                 </div>
             </div>
@@ -233,6 +242,7 @@ $active_page = 'laporan';
                             <th>Tanggal Expired</th>
                             <th>Supplier</th>
                             <th>Jumlah Mutasi (Dus)</th>
+                            <th>Satuan per Dus</th>
                             <th>Jumlah Mutasi (Pieces)</th>
                             <th>Harga (Rp/Piece)</th>
                             <th>Total Nilai Mutasi</th>
@@ -243,7 +253,7 @@ $active_page = 'laporan';
                         <?php if ($result_mutasi && $result_mutasi->num_rows > 0): ?>
                             <?php while ($row = $result_mutasi->fetch_assoc()): ?>
                                 <tr>
-                                    <td><?php echo formatWaktu($row['WAKTU_MUTASI']); ?></td>
+                                    <td data-order="<?php echo strtotime($row['WAKTU_MUTASI']); ?>"><?php echo formatWaktu($row['WAKTU_MUTASI']); ?></td>
                                     <td><?php echo htmlspecialchars($row['ID_MUTASI_BARANG_RUSAK']); ?></td>
                                     <td><?php echo htmlspecialchars($row['KD_BARANG']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
@@ -252,16 +262,29 @@ $active_page = 'laporan';
                                     <td><?php echo htmlspecialchars($row['ID_PESAN_BARANG'] ?? '-'); ?></td>
                                     <td><?php echo formatTanggalExpired($row['TGL_EXPIRED'] ?? null); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_SUPPLIER']); ?></td>
-                                    <td class="text-danger fw-bold"><?php echo number_format(abs($row['JUMLAH_MUTASI_DUS']), 0, ',', '.'); ?></td>
-                                    <td class="text-danger fw-bold"><?php echo number_format(abs($row['TOTAL_BARANG_PIECES']), 0, ',', '.'); ?></td>
+                                    <td>
+                                        <span class="text-danger fw-bold">
+                                            <?php echo number_format($row['JUMLAH_MUTASI_DUS'], 0, ',', '.'); ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo number_format($row['SATUAN_PERDUS'], 0, ',', '.'); ?></td>
+                                    <td>
+                                        <span class="text-danger fw-bold">
+                                            <?php echo number_format($row['TOTAL_BARANG_PIECES'], 0, ',', '.'); ?>
+                                        </span>
+                                    </td>
                                     <td><?php echo formatRupiah($row['HARGA_BARANG_PIECES']); ?></td>
-                                    <td class="text-danger fw-bold"><?php echo formatRupiah(abs($row['TOTAL_UANG'])); ?></td>
+                                    <td>
+                                        <span class="text-danger fw-bold">
+                                            <?php echo formatRupiah($row['TOTAL_UANG']); ?>
+                                        </span>
+                                    </td>
                                     <td><?php echo htmlspecialchars($row['NAMA_USER'] ?? '-'); ?></td>
                                 </tr>
                             <?php endwhile; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="14" class="text-center text-muted">Tidak ada data mutasi barang rusak pada periode yang dipilih</td>
+                                <td colspan="15" class="text-center text-muted">Tidak ada data mutasi barang rusak pada periode yang dipilih</td>
                             </tr>
                         <?php endif; ?>
                     </tbody>

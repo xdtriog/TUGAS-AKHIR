@@ -195,22 +195,22 @@ function formatRupiah($angka) {
     return "Rp. " . number_format($angka, 0, ',', '.');
 }
 
-// Format tanggal
+// Format tanggal (dd/mm/yyyy)
 function formatTanggal($tanggal) {
-    $bulan = [
-        1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-        5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-        9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-    ];
-    
+    if (empty($tanggal) || $tanggal == null) {
+        return '-';
+    }
     $date = new DateTime($tanggal);
-    return $date->format('d') . ' ' . $bulan[(int)$date->format('m')] . ' ' . $date->format('Y');
+    return $date->format('d/m/Y');
 }
 
-// Format waktu
+// Format waktu (dd/mm/yyyy HH:ii WIB)
 function formatWaktu($waktu) {
+    if (empty($waktu) || $waktu == null) {
+        return '-';
+    }
     $date = new DateTime($waktu);
-    return $date->format('d/m/Y H:i');
+    return $date->format('d/m/Y H:i') . ' WIB';
 }
 
 // Set active page untuk sidebar
@@ -326,7 +326,7 @@ $active_page = 'laporan';
                         <?php if ($result_penjualan && $result_penjualan->num_rows > 0): ?>
                             <?php while ($row = $result_penjualan->fetch_assoc()): ?>
                                 <tr>
-                                    <td><?php echo formatWaktu($row['WAKTU_NOTA']); ?></td>
+                                    <td data-order="<?php echo strtotime($row['WAKTU_NOTA']); ?>"><?php echo formatWaktu($row['WAKTU_NOTA']); ?></td>
                                     <td><?php echo htmlspecialchars($row['ID_NOTA_JUAL']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_USER'] ?? '-'); ?></td>
                                     <td class="text-center"><?php echo number_format($row['TOTAL_JUAL_BARANG'], 0, ',', '.'); ?></td>
