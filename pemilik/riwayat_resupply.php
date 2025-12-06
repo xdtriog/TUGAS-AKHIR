@@ -133,7 +133,23 @@ GROUP BY dtb.ID_DETAIL_TRANSFER_BARANG, dtb.ID_TRANSFER_BARANG, dtb.TOTAL_PESAN_
          dtb.TOTAL_KIRIM_DUS, dtb.TOTAL_DITOLAK_DUS, dtb.TOTAL_MASUK_DUS, dtb.STATUS,
          tb.WAKTU_PESAN_TRANSFER, tb.WAKTU_KIRIM_TRANSFER, tb.WAKTU_SELESAI_TRANSFER, 
          tb.STATUS, tb.KD_LOKASI_ASAL, tb.KD_LOKASI_TUJUAN, s.SATUAN
-ORDER BY tb.WAKTU_PESAN_TRANSFER DESC, dtb.ID_DETAIL_TRANSFER_BARANG DESC";
+ORDER BY 
+    CASE dtb.STATUS
+        WHEN 'DIPESAN' THEN 1
+        WHEN 'DIKIRIM' THEN 2
+        WHEN 'SELESAI' THEN 3
+        ELSE 4
+    END,
+    CASE dtb.STATUS
+        WHEN 'DIPESAN' THEN tb.WAKTU_PESAN_TRANSFER
+        WHEN 'DIKIRIM' THEN tb.WAKTU_KIRIM_TRANSFER
+        ELSE NULL
+    END ASC,
+    CASE dtb.STATUS
+        WHEN 'SELESAI' THEN tb.WAKTU_SELESAI_TRANSFER
+        ELSE NULL
+    END DESC,
+    dtb.ID_DETAIL_TRANSFER_BARANG DESC";
 
 $stmt_riwayat = $conn->prepare($query_riwayat);
 $stmt_riwayat->bind_param("ss", $kd_barang, $kd_lokasi);
@@ -268,7 +284,24 @@ $active_page = 'stock';
                                     <td><?php echo htmlspecialchars($row['ID_DETAIL_TRANSFER_BARANG']); ?></td>
                                     <td><?php echo isset($lokasi_map[$row['KD_LOKASI_ASAL']]) ? htmlspecialchars($lokasi_map[$row['KD_LOKASI_ASAL']]) : htmlspecialchars($row['KD_LOKASI_ASAL']); ?></td>
                                     <td><?php echo isset($lokasi_map[$row['KD_LOKASI_TUJUAN']]) ? htmlspecialchars($lokasi_map[$row['KD_LOKASI_TUJUAN']]) : htmlspecialchars($row['KD_LOKASI_TUJUAN']); ?></td>
-                                    <td><?php echo formatWaktuStack($row['WAKTU_PESAN_TRANSFER'], $row['WAKTU_KIRIM_TRANSFER'], $row['WAKTU_SELESAI_TRANSFER'], $row['STATUS_DETAIL']); ?></td>
+                                    <td data-order="<?php 
+                                        $waktu_order = '';
+                                        switch($row['STATUS_DETAIL']) {
+                                            case 'DIPESAN':
+                                                $waktu_order = !empty($row['WAKTU_PESAN_TRANSFER']) ? strtotime($row['WAKTU_PESAN_TRANSFER']) : 0;
+                                                break;
+                                            case 'DIKIRIM':
+                                                $waktu_order = !empty($row['WAKTU_KIRIM_TRANSFER']) ? strtotime($row['WAKTU_KIRIM_TRANSFER']) : 0;
+                                                break;
+                                            case 'SELESAI':
+                                                // Use negative timestamp for DESC sorting (newest first)
+                                                $waktu_order = !empty($row['WAKTU_SELESAI_TRANSFER']) ? -strtotime($row['WAKTU_SELESAI_TRANSFER']) : 0;
+                                                break;
+                                            default:
+                                                $waktu_order = !empty($row['WAKTU_PESAN_TRANSFER']) ? strtotime($row['WAKTU_PESAN_TRANSFER']) : 0;
+                                        }
+                                        echo $waktu_order;
+                                    ?>"><?php echo formatWaktuStack($row['WAKTU_PESAN_TRANSFER'], $row['WAKTU_KIRIM_TRANSFER'], $row['WAKTU_SELESAI_TRANSFER'], $row['STATUS_DETAIL']); ?></td>
                                     <td><?php echo number_format($row['TOTAL_PESAN_TRANSFER_DUS'], 0, ',', '.'); ?></td>
                                     <td><?php echo $row['TOTAL_MASUK_DUS'] ? number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['TOTAL_KIRIM_DUS'] ? number_format($row['TOTAL_KIRIM_DUS'], 0, ',', '.') : '-'; ?></td>
@@ -301,7 +334,23 @@ $active_page = 'stock';
                                         }
                                         ?>
                                     </td>
-                                    <td>
+                                    <td data-order="<?php 
+                                        $status_order = 0;
+                                        switch($row['STATUS_DETAIL']) {
+                                            case 'DIPESAN':
+                                                $status_order = 1;
+                                                break;
+                                            case 'DIKIRIM':
+                                                $status_order = 2;
+                                                break;
+                                            case 'SELESAI':
+                                                $status_order = 3;
+                                                break;
+                                            default:
+                                                $status_order = 4;
+                                        }
+                                        echo $status_order;
+                                    ?>">
                                         <?php 
                                         $status_text = '';
                                         $status_class = '';
@@ -395,9 +444,10 @@ $active_page = 'stock';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[0, 'desc']], // Sort by ID TRANSFER descending
+                order: [[10, 'asc'], [4, 'asc']], // Sort by Status (priority) then Waktu
                 columnDefs: [
-                    { orderable: false, targets: [9, 11] } // Disable sorting on Batch and Action columns
+                    { orderable: false, targets: [9, 11] }, // Disable sorting on Batch and Action columns
+                    { type: 'num', targets: [10, 4] } // Status and Waktu columns use numeric sorting
                 ],
                 scrollX: true,
                 autoWidth: false

@@ -585,7 +585,20 @@ LEFT JOIN MASTER_LOKASI ml_asal ON tb.KD_LOKASI_ASAL = ml_asal.KD_LOKASI
 LEFT JOIN DETAIL_TRANSFER_BARANG dtb ON tb.ID_TRANSFER_BARANG = dtb.ID_TRANSFER_BARANG
 WHERE tb.KD_LOKASI_TUJUAN = ? AND tb.STATUS IN ('DIKIRIM', 'SELESAI')
 GROUP BY tb.ID_TRANSFER_BARANG, tb.WAKTU_PESAN_TRANSFER, tb.WAKTU_KIRIM_TRANSFER, tb.WAKTU_SELESAI_TRANSFER, tb.STATUS, tb.KD_LOKASI_ASAL, ml_asal.KD_LOKASI, ml_asal.NAMA_LOKASI, ml_asal.ALAMAT_LOKASI
-ORDER BY tb.WAKTU_PESAN_TRANSFER DESC";
+ORDER BY 
+    CASE tb.STATUS
+        WHEN 'DIKIRIM' THEN 1
+        WHEN 'SELESAI' THEN 2
+        ELSE 3
+    END,
+    CASE tb.STATUS
+        WHEN 'DIKIRIM' THEN tb.WAKTU_KIRIM_TRANSFER
+        ELSE NULL
+    END ASC,
+    CASE tb.STATUS
+        WHEN 'SELESAI' THEN tb.WAKTU_SELESAI_TRANSFER
+        ELSE NULL
+    END DESC";
 
 $stmt_transfer = $conn->prepare($query_transfer);
 $stmt_transfer->bind_param("s", $kd_lokasi);
@@ -681,7 +694,21 @@ $active_page = 'barang_masuk';
                             <?php while ($row = $result_transfer->fetch_assoc()): ?>
                                 <tr>
                                     <td><?php echo htmlspecialchars($row['ID_TRANSFER_BARANG']); ?></td>
-                                    <td><?php echo formatWaktuStack($row['WAKTU_PESAN_TRANSFER'], $row['WAKTU_KIRIM_TRANSFER'], $row['WAKTU_SELESAI_TRANSFER'], $row['STATUS']); ?></td>
+                                    <td data-order="<?php 
+                                        $waktu_order = '';
+                                        switch($row['STATUS']) {
+                                            case 'DIKIRIM':
+                                                $waktu_order = !empty($row['WAKTU_KIRIM_TRANSFER']) ? strtotime($row['WAKTU_KIRIM_TRANSFER']) : 0;
+                                                break;
+                                            case 'SELESAI':
+                                                // Use negative timestamp for DESC sorting (newest first)
+                                                $waktu_order = !empty($row['WAKTU_SELESAI_TRANSFER']) ? -strtotime($row['WAKTU_SELESAI_TRANSFER']) : 0;
+                                                break;
+                                            default:
+                                                $waktu_order = !empty($row['WAKTU_PESAN_TRANSFER']) ? strtotime($row['WAKTU_PESAN_TRANSFER']) : 0;
+                                        }
+                                        echo $waktu_order;
+                                    ?>"><?php echo formatWaktuStack($row['WAKTU_PESAN_TRANSFER'], $row['WAKTU_KIRIM_TRANSFER'], $row['WAKTU_SELESAI_TRANSFER'], $row['STATUS']); ?></td>
                                     <td>
                                         <?php 
                                         if (!empty($row['NAMA_LOKASI_ASAL'])) {
@@ -696,32 +723,28 @@ $active_page = 'barang_masuk';
                                         ?>
                                     </td>
                                     <td><?php echo number_format($row['TOTAL_DIPESAN_DUS'], 0, ',', '.'); ?></td>
-                                    <td>
-                                        <?php 
+                                    <td data-order="<?php 
                                         $status_text = '';
                                         $status_class = '';
+                                        $status_order = 0;
                                         switch($row['STATUS']) {
-                                            case 'DIPESAN':
-                                                $status_text = 'Dipesan';
-                                                $status_class = 'warning';
-                                                break;
                                             case 'DIKIRIM':
                                                 $status_text = 'Dikirim';
                                                 $status_class = 'info';
+                                                $status_order = 1;
                                                 break;
                                             case 'SELESAI':
                                                 $status_text = 'Selesai';
                                                 $status_class = 'success';
-                                                break;
-                                            case 'DIBATALKAN':
-                                                $status_text = 'Dibatalkan';
-                                                $status_class = 'danger';
+                                                $status_order = 2;
                                                 break;
                                             default:
                                                 $status_text = $row['STATUS'];
                                                 $status_class = 'secondary';
+                                                $status_order = 3;
                                         }
-                                        ?>
+                                        echo $status_order;
+                                    ?>">
                                         <span class="badge bg-<?php echo $status_class; ?>"><?php echo $status_text; ?></span>
                                     </td>
                                     <td>
@@ -852,9 +875,10 @@ $active_page = 'barang_masuk';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[0, 'desc']], // Sort by ID Transfer descending
+                order: [[4, 'asc'], [1, 'asc']], // Sort by Status (priority) then Waktu
                 columnDefs: [
-                    { orderable: false, targets: [5] } // Disable sorting on Action column
+                    { orderable: false, targets: [5] }, // Disable sorting on Action column
+                    { type: 'num', targets: [4, 1] } // Status and Waktu columns use numeric sorting
                 ],
                 scrollX: true,
                 autoWidth: false

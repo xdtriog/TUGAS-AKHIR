@@ -387,7 +387,20 @@ LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BA
 LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
 LEFT JOIN STOCK s ON pb.KD_BARANG = s.KD_BARANG AND pb.KD_LOKASI = s.KD_LOKASI
 WHERE pb.KD_LOKASI = ? AND pb.STATUS IN ('DIKIRIM', 'SELESAI')
-ORDER BY pb.WAKTU_PESAN DESC";
+ORDER BY 
+    CASE pb.STATUS
+        WHEN 'DIKIRIM' THEN 1
+        WHEN 'SELESAI' THEN 2
+        ELSE 3
+    END,
+    CASE pb.STATUS
+        WHEN 'DIKIRIM' THEN pb.WAKTU_SELESAI
+        ELSE NULL
+    END ASC,
+    CASE pb.STATUS
+        WHEN 'SELESAI' THEN pb.WAKTU_SELESAI
+        ELSE NULL
+    END DESC";
 $stmt_barang_masuk = $conn->prepare($query_barang_masuk);
 $stmt_barang_masuk->bind_param("s", $kd_lokasi);
 $stmt_barang_masuk->execute();
@@ -513,7 +526,21 @@ $active_page = 'barang_masuk';
                                         echo $supplier_display;
                                         ?>
                                     </td>
-                                    <td><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_ESTIMASI_SELESAI'], $row['WAKTU_SELESAI'], $row['STATUS']); ?></td>
+                                    <td data-order="<?php 
+                                        $waktu_order = '';
+                                        switch($row['STATUS']) {
+                                            case 'DIKIRIM':
+                                                $waktu_order = !empty($row['WAKTU_SELESAI']) ? strtotime($row['WAKTU_SELESAI']) : 0;
+                                                break;
+                                            case 'SELESAI':
+                                                // Use negative timestamp for DESC sorting (newest first)
+                                                $waktu_order = !empty($row['WAKTU_SELESAI']) ? -strtotime($row['WAKTU_SELESAI']) : 0;
+                                                break;
+                                            default:
+                                                $waktu_order = !empty($row['WAKTU_PESAN']) ? strtotime($row['WAKTU_PESAN']) : 0;
+                                        }
+                                        echo $waktu_order;
+                                    ?>"><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_ESTIMASI_SELESAI'], $row['WAKTU_SELESAI'], $row['STATUS']); ?></td>
                                     <td><?php echo htmlspecialchars($row['KD_BARANG']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
@@ -523,24 +550,28 @@ $active_page = 'barang_masuk';
                                     <td><?php echo $row['TOTAL_MASUK_DUS'] ? number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['JUMLAH_DITOLAK_DUS'] ? number_format($row['JUMLAH_DITOLAK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo htmlspecialchars($row['SATUAN'] ?? 'Dus'); ?></td>
-                                    <td>
-                                        <?php 
+                                    <td data-order="<?php 
                                         $status_text = '';
                                         $status_class = '';
+                                        $status_order = 0;
                                         switch($row['STATUS']) {
                                             case 'DIKIRIM':
                                                 $status_text = 'Dikirim';
                                                 $status_class = 'info';
+                                                $status_order = 1;
                                                 break;
                                             case 'SELESAI':
                                                 $status_text = 'Selesai';
                                                 $status_class = 'success';
+                                                $status_order = 2;
                                                 break;
                                             default:
                                                 $status_text = $row['STATUS'];
                                                 $status_class = 'secondary';
+                                                $status_order = 3;
                                         }
-                                        ?>
+                                        echo $status_order;
+                                    ?>">
                                         <span class="badge bg-<?php echo $status_class; ?>"><?php echo $status_text; ?></span>
                                     </td>
                                     <td>
@@ -664,9 +695,10 @@ $active_page = 'barang_masuk';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[2, 'desc']], // Sort by Waktu descending
+                order: [[10, 'asc'], [2, 'asc']], // Sort by Status (priority) then Waktu
                 columnDefs: [
-                    { orderable: false, targets: 13 } // Disable sorting on Action column
+                    { orderable: false, targets: 13 }, // Disable sorting on Action column
+                    { type: 'num', targets: [10, 2] } // Status and Waktu columns use numeric sorting
                 ],
                 scrollX: true,
                 autoWidth: false,

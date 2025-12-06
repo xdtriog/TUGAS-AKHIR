@@ -114,7 +114,22 @@ FROM PESAN_BARANG pb
 LEFT JOIN MASTER_LOKASI ml ON pb.KD_LOKASI = ml.KD_LOKASI
 LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
 WHERE pb.KD_BARANG = ?
-ORDER BY pb.WAKTU_PESAN DESC";
+ORDER BY 
+    CASE pb.STATUS
+        WHEN 'DIPESAN' THEN 1
+        WHEN 'DIKIRIM' THEN 2
+        WHEN 'SELESAI' THEN 3
+        ELSE 4
+    END,
+    CASE pb.STATUS
+        WHEN 'DIPESAN' THEN pb.WAKTU_PESAN
+        WHEN 'DIKIRIM' THEN pb.WAKTU_SELESAI
+        ELSE NULL
+    END ASC,
+    CASE pb.STATUS
+        WHEN 'SELESAI' THEN pb.WAKTU_SELESAI
+        ELSE NULL
+    END DESC";
 $stmt_riwayat = $conn->prepare($query_riwayat);
 $stmt_riwayat->bind_param("s", $kd_barang);
 $stmt_riwayat->execute();
@@ -279,7 +294,24 @@ $active_page = 'stock';
                                         echo $supplier_display;
                                         ?>
                                     </td>
-                                    <td><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_ESTIMASI_SELESAI'], $row['WAKTU_SELESAI'], $row['STATUS']); ?></td>
+                                    <td data-order="<?php 
+                                        $waktu_order = '';
+                                        switch($row['STATUS']) {
+                                            case 'DIPESAN':
+                                                $waktu_order = !empty($row['WAKTU_PESAN']) ? strtotime($row['WAKTU_PESAN']) : 0;
+                                                break;
+                                            case 'DIKIRIM':
+                                                $waktu_order = !empty($row['WAKTU_SELESAI']) ? strtotime($row['WAKTU_SELESAI']) : 0;
+                                                break;
+                                            case 'SELESAI':
+                                                // Use negative timestamp for DESC sorting (newest first)
+                                                $waktu_order = !empty($row['WAKTU_SELESAI']) ? -strtotime($row['WAKTU_SELESAI']) : 0;
+                                                break;
+                                            default:
+                                                $waktu_order = !empty($row['WAKTU_PESAN']) ? strtotime($row['WAKTU_PESAN']) : 0;
+                                        }
+                                        echo $waktu_order;
+                                    ?>"><?php echo formatWaktuStack($row['WAKTU_PESAN'], $row['WAKTU_ESTIMASI_SELESAI'], $row['WAKTU_SELESAI'], $row['STATUS']); ?></td>
                                     <td><?php echo $row['JUMLAH_PESAN_BARANG_DUS'] ? number_format($row['JUMLAH_PESAN_BARANG_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['TOTAL_MASUK_DUS'] ? number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['JUMLAH_TIBA_DUS'] ? number_format($row['JUMLAH_TIBA_DUS'], 0, ',', '.') : '-'; ?></td>
@@ -293,33 +325,34 @@ $active_page = 'stock';
                                         echo formatRupiah($total_bayar);
                                     ?></td>
                                     <td><?php echo formatRupiah($row['BIAYA_PENGIRIMAAN']); ?></td>
-                                    <td>
+                                    <td data-order="<?php 
+                                        $status_text = '';
+                                        $status_class = '';
+                                        $status_order = 0;
+                                        switch($row['STATUS']) {
+                                            case 'DIPESAN':
+                                                $status_text = 'Dipesan';
+                                                $status_class = 'warning';
+                                                $status_order = 1;
+                                                break;
+                                            case 'DIKIRIM':
+                                                $status_text = 'Dikirim';
+                                                $status_class = 'info';
+                                                $status_order = 2;
+                                                break;
+                                            case 'SELESAI':
+                                                $status_text = 'Selesai';
+                                                $status_class = 'success';
+                                                $status_order = 3;
+                                                break;
+                                            default:
+                                                $status_text = $row['STATUS'];
+                                                $status_class = 'secondary';
+                                                $status_order = 4;
+                                        }
+                                        echo $status_order;
+                                    ?>">
                                         <div class="d-flex flex-column gap-1">
-                                            <?php 
-                                            $status_text = '';
-                                            $status_class = '';
-                                            switch($row['STATUS']) {
-                                                case 'DIPESAN':
-                                                    $status_text = 'Dipesan';
-                                                    $status_class = 'warning';
-                                                    break;
-                                                case 'DIKIRIM':
-                                                    $status_text = 'Dikirim';
-                                                    $status_class = 'info';
-                                                    break;
-                                                case 'SELESAI':
-                                                    $status_text = 'Selesai';
-                                                    $status_class = 'success';
-                                                    break;
-                                                case 'DIBATALKAN':
-                                                    $status_text = 'Dibatalkan';
-                                                    $status_class = 'danger';
-                                                    break;
-                                                default:
-                                                    $status_text = $row['STATUS'];
-                                                    $status_class = 'secondary';
-                                            }
-                                            ?>
                                             <span class="badge bg-<?php echo $status_class; ?>"><?php echo $status_text; ?></span>
                                             <?php if (!empty($row['ID_PERHITUNGAN_KUANTITAS_POQ'])): ?>
                                                 <span class="badge mt-1" style="background-color: #6f42c1; color: white;">POQ - <?php echo htmlspecialchars($row['ID_PERHITUNGAN_KUANTITAS_POQ']); ?></span>
@@ -388,9 +421,10 @@ $active_page = 'stock';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[2, 'desc']], // Sort by Waktu descending
+                order: [[10, 'asc'], [2, 'asc']], // Sort by Status (priority) then Waktu
                 columnDefs: [
-                    { orderable: false, targets: 11 } // Disable sorting on Action column
+                    { orderable: false, targets: 11 }, // Disable sorting on Action column
+                    { type: 'num', targets: [10, 2] } // Status and Waktu columns use numeric sorting
                 ],
                 scrollX: true,
                 responsive: true,
