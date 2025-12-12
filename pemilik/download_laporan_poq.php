@@ -280,7 +280,8 @@ function formatRupiah($angka) {
                     <th style="width: 8%;">Kode Barang</th>
                     <th style="width: 10%;">Merek</th>
                     <th style="width: 10%;">Kategori</th>
-                    <th style="width: 15%;">Nama Barang</th>
+                    <th style="width: 12%;">Nama Barang</th>
+                    <th style="width: 5%;" class="text-center">Berat (gr)</th>
                     <th style="width: 8%;" class="text-center">Demand Rate<br>(dus/hari)</th>
                     <th style="width: 10%;" class="text-right">Setup Cost<br>(Rp)</th>
                     <th style="width: 10%;" class="text-right">Holding Cost<br>(Rp/dus/hari)</th>
@@ -300,6 +301,7 @@ function formatRupiah($angka) {
                             <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
+                            <td class="text-center"><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
                             <td class="text-center"><?php echo number_format($row['DEMAND_RATE'], 2, ',', '.'); ?></td>
                             <td class="text-right"><?php echo formatRupiah($row['SETUP_COST']); ?></td>
                             <td class="text-right"><?php echo formatRupiah($row['HOLDING_COST']); ?></td>
@@ -309,7 +311,7 @@ function formatRupiah($angka) {
                     <?php endwhile; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="10" class="text-center">Tidak ada data interval POQ</td>
+                        <td colspan="12" class="text-center">Tidak ada data interval POQ</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
@@ -323,7 +325,8 @@ function formatRupiah($angka) {
                     <th style="width: 8%;">Kode Barang</th>
                     <th style="width: 10%;">Merek</th>
                     <th style="width: 10%;">Kategori</th>
-                    <th style="width: 15%;">Nama Barang</th>
+                    <th style="width: 12%;">Nama Barang</th>
+                    <th style="width: 5%;" class="text-center">Berat (gr)</th>
                     <th style="width: 8%;" class="text-center">Demand Rate<br>(dus/hari)</th>
                     <th style="width: 6%;" class="text-center">Lead Time<br>(hari)</th>
                     <th style="width: 6%;" class="text-center">Interval POQ<br>(hari)</th>
@@ -346,6 +349,7 @@ function formatRupiah($angka) {
                             <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
+                            <td class="text-center"><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
                             <td class="text-center"><?php echo number_format($row['DEMAND_RATE'], 2, ',', '.'); ?></td>
                             <td class="text-center"><?php echo number_format($row['LEAD_TIME'], 0, ',', '.'); ?></td>
                             <td class="text-center"><?php echo number_format($row['INTERVAL_HARI'], 0, ',', '.'); ?></td>
@@ -358,7 +362,7 @@ function formatRupiah($angka) {
                     <?php endwhile; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="13" class="text-center">Tidak ada data perhitungan kuantitas POQ</td>
+                        <td colspan="14" class="text-center">Tidak ada data perhitungan kuantitas POQ</td>
                     </tr>
                 <?php endif; ?>
             </tbody>

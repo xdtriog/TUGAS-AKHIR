@@ -47,6 +47,7 @@ $query_mutasi = "SELECT
     mbr.TOTAL_UANG,
     u.NAMA as NAMA_USER,
     mb.NAMA_BARANG,
+    mb.BERAT,
     COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
     COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI
 FROM MUTASI_BARANG_RUSAK mbr
@@ -305,6 +306,7 @@ function formatRupiah($angka) {
                     <th style="width: 6%;">Merek</th>
                     <th style="width: 6%;">Kategori</th>
                     <th style="width: 12%;">Nama Barang</th>
+                    <th style="width: 5%;" class="text-center">Berat (gr)</th>
                     <th style="width: 5%;" class="text-center">Jumlah Mutasi (Pieces)</th>
                     <th style="width: 6%;" class="text-right">Harga (Rp/Piece)</th>
                     <th style="width: 8%;" class="text-right">Total Nilai Mutasi</th>
@@ -325,6 +327,7 @@ function formatRupiah($angka) {
                             <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
+                            <td class="text-center"><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
                             <td class="text-center"><?php echo number_format($row['TOTAL_BARANG_PIECES'], 0, ',', '.'); ?></td>
                             <td class="text-right"><?php echo formatRupiah($row['HARGA_BARANG_PIECES']); ?></td>
                             <td class="text-right"><?php echo formatRupiah($row['TOTAL_UANG']); ?></td>
@@ -333,7 +336,7 @@ function formatRupiah($angka) {
                     <?php endwhile; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="11" class="text-center">Tidak ada data mutasi barang rusak pada periode yang dipilih</td>
+                        <td colspan="12" class="text-center">Tidak ada data mutasi barang rusak pada periode yang dipilih</td>
                     </tr>
                 <?php endif; ?>
             </tbody>

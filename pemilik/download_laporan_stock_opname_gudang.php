@@ -50,6 +50,7 @@ $query_opname = "SELECT
     so.TOTAL_UANG,
     u.NAMA as NAMA_USER,
     mb.NAMA_BARANG,
+    mb.BERAT,
     COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
     COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
     so.REF_BATCH as ID_PESAN_BARANG,
@@ -337,6 +338,7 @@ function formatTanggalExpired($tanggal) {
                     <th style="width: 6%;">Merek</th>
                     <th style="width: 6%;">Kategori</th>
                     <th style="width: 10%;">Nama Barang</th>
+                    <th style="width: 5%;" class="text-center">Berat (gr)</th>
                     <th style="width: 6%;">ID Batch</th>
                     <th style="width: 7%;">Tanggal Expired</th>
                     <th style="width: 8%;">Supplier</th>
@@ -364,6 +366,7 @@ function formatTanggalExpired($tanggal) {
                             <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
+                            <td class="text-center"><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
                             <td><?php echo htmlspecialchars($row['ID_PESAN_BARANG'] ?? '-'); ?></td>
                             <td><?php echo formatTanggalExpired($row['TGL_EXPIRED'] ?? null); ?></td>
                             <td><?php echo htmlspecialchars($row['NAMA_SUPPLIER']); ?></td>
@@ -379,7 +382,7 @@ function formatTanggalExpired($tanggal) {
                     <?php endwhile; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="17" class="text-center">Tidak ada data stock opname pada periode yang dipilih</td>
+                        <td colspan="18" class="text-center">Tidak ada data stock opname pada periode yang dipilih</td>
                     </tr>
                 <?php endif; ?>
             </tbody>

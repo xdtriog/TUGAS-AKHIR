@@ -40,8 +40,34 @@ if ($lokasi['TYPE_LOKASI'] != 'toko') {
 }
 
 // Get filter tanggal (default: bulan ini)
-$tanggal_dari = isset($_GET['tanggal_dari']) ? trim($_GET['tanggal_dari']) : date('Y-m-01');
-$tanggal_sampai = isset($_GET['tanggal_sampai']) ? trim($_GET['tanggal_sampai']) : date('Y-m-t');
+// Konversi format dd/mm/yyyy ke Y-m-d jika diperlukan
+$tanggal_dari_raw = isset($_GET['tanggal_dari']) ? trim($_GET['tanggal_dari']) : date('d/m/Y', strtotime(date('Y-m-01')));
+$tanggal_sampai_raw = isset($_GET['tanggal_sampai']) ? trim($_GET['tanggal_sampai']) : date('d/m/Y', strtotime(date('Y-m-t')));
+
+// Konversi dari dd/mm/yyyy ke Y-m-d
+function convertDateToYMD($dateString) {
+    if (empty($dateString)) return '';
+    // Jika sudah format Y-m-d, return as is
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateString)) {
+        return $dateString;
+    }
+    // Jika format dd/mm/yyyy, konversi
+    if (preg_match('/^(\d{2})\/(\d{2})\/(\d{4})$/', $dateString, $matches)) {
+        return $matches[3] . '-' . $matches[2] . '-' . $matches[1];
+    }
+    return $dateString;
+}
+
+$tanggal_dari = convertDateToYMD($tanggal_dari_raw);
+$tanggal_sampai = convertDateToYMD($tanggal_sampai_raw);
+
+// Jika konversi gagal, gunakan default
+if (empty($tanggal_dari) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $tanggal_dari)) {
+    $tanggal_dari = date('Y-m-01');
+}
+if (empty($tanggal_sampai) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $tanggal_sampai)) {
+    $tanggal_sampai = date('Y-m-t');
+}
 
 // Query untuk mendapatkan daftar barang di lokasi ini
 $query_barang = "SELECT DISTINCT
@@ -70,7 +96,7 @@ $stock_awal = 0;
 
 if (!empty($kd_barang)) {
     // Validasi bahwa barang ada di lokasi ini
-    $query_validate = "SELECT mb.KD_BARANG, mb.NAMA_BARANG, mb.SATUAN_PERDUS,
+    $query_validate = "SELECT mb.KD_BARANG, mb.NAMA_BARANG, mb.SATUAN_PERDUS, mb.BERAT,
                        COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
                        COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
                        s.JUMLAH_BARANG as STOCK_SEKARANG, s.SATUAN
@@ -99,23 +125,30 @@ if (!empty($kd_barang)) {
         $stmt_stock_awal->execute();
         $result_stock_awal = $stmt_stock_awal->get_result();
         
-        if ($result_stock_awal->num_rows > 0) {
-            $stock_awal = intval($result_stock_awal->fetch_assoc()['JUMLAH_AKHIR']);
+        // Stock Awal Periode = JUMLAH_AWAL dari history pertama dalam periode (data pertama dari filter Tanggal Dari)
+        $tanggal_dari_datetime = $tanggal_dari . ' 00:00:00';
+        $tanggal_sampai_end = date('Y-m-d', strtotime($tanggal_sampai . ' +1 day'));
+        $query_first_in_period = "SELECT JUMLAH_AWAL 
+                                FROM STOCK_HISTORY 
+                                WHERE KD_BARANG = ? AND KD_LOKASI = ? 
+                                AND WAKTU_CHANGE >= ? AND WAKTU_CHANGE < ?
+                                ORDER BY WAKTU_CHANGE ASC 
+                                LIMIT 1";
+        $stmt_first = $conn->prepare($query_first_in_period);
+        $stmt_first->bind_param("ssss", $kd_barang, $kd_lokasi, $tanggal_dari_datetime, $tanggal_sampai_end);
+        $stmt_first->execute();
+        $result_first = $stmt_first->get_result();
+        
+        if ($result_first->num_rows > 0) {
+            // Ada history dalam periode, ambil JUMLAH_AWAL dari history pertama
+            $stock_awal = intval($result_first->fetch_assoc()['JUMLAH_AWAL']);
         } else {
-            // Jika tidak ada history sebelum periode, ambil dari stock awal (0 atau dari stock saat ini jika tidak ada history sama sekali)
-            $query_check_history = "SELECT COUNT(*) as TOTAL FROM STOCK_HISTORY WHERE KD_BARANG = ? AND KD_LOKASI = ?";
-            $stmt_check = $conn->prepare($query_check_history);
-            $stmt_check->bind_param("ss", $kd_barang, $kd_lokasi);
-            $stmt_check->execute();
-            $result_check = $stmt_check->get_result();
-            $total_history = intval($result_check->fetch_assoc()['TOTAL']);
-            
-            if ($total_history == 0) {
-                // Tidak ada history sama sekali, stock awal = stock saat ini
-                $stock_awal = intval($barang_selected['STOCK_SEKARANG']);
+            // Tidak ada history dalam periode, ambil dari JUMLAH_AKHIR history terakhir sebelum periode
+            if ($result_stock_awal->num_rows > 0) {
+                $stock_awal = intval($result_stock_awal->fetch_assoc()['JUMLAH_AKHIR']);
             } else {
-                // Ada history tapi tidak ada sebelum periode, stock awal = 0
-                $stock_awal = 0;
+                // Tidak ada history sama sekali, gunakan stock saat ini
+                $stock_awal = intval($barang_selected['STOCK_SEKARANG']);
             }
         }
         
@@ -193,6 +226,8 @@ $active_page = 'laporan';
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- DataTables CSS -->
     <link href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <!-- Flatpickr CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <!-- Custom CSS -->
     <link href="../assets/css/style.css" rel="stylesheet">
 </head>
@@ -233,11 +268,15 @@ $active_page = 'laporan';
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-bold">Tanggal Dari</label>
-                        <input type="date" class="form-control" name="tanggal_dari" value="<?php echo htmlspecialchars($tanggal_dari); ?>" required>
+                        <input type="text" class="form-control" name="tanggal_dari" id="tanggal_dari" 
+                               value="<?php echo !empty($tanggal_dari) ? date('d/m/Y', strtotime($tanggal_dari)) : ''; ?>" 
+                               placeholder="dd/mm/yyyy" required readonly>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-bold">Tanggal Sampai</label>
-                        <input type="date" class="form-control" name="tanggal_sampai" value="<?php echo htmlspecialchars($tanggal_sampai); ?>" required>
+                        <input type="text" class="form-control" name="tanggal_sampai" id="tanggal_sampai" 
+                               value="<?php echo !empty($tanggal_sampai) ? date('d/m/Y', strtotime($tanggal_sampai)) : ''; ?>" 
+                               placeholder="dd/mm/yyyy" required readonly>
                     </div>
                     <div class="col-md-3 d-flex align-items-end gap-2">
                         <button type="submit" class="btn btn-primary">Tampilkan</button>
@@ -257,7 +296,7 @@ $active_page = 'laporan';
                 <div class="card-body">
                     <h5 class="card-title mb-3">Informasi Barang</h5>
                     <div class="row">
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <strong>Kode Barang:</strong><br>
                             <?php echo htmlspecialchars($barang_selected['KD_BARANG']); ?>
                         </div>
@@ -274,6 +313,10 @@ $active_page = 'laporan';
                             <?php echo htmlspecialchars($barang_selected['NAMA_KATEGORI']); ?>
                         </div>
                         <div class="col-md-2">
+                            <strong>Berat (gr):</strong><br>
+                            <?php echo number_format($barang_selected['BERAT'], 0, ',', '.'); ?>
+                        </div>
+                        <div class="col-md-1">
                             <strong>Stock Saat Ini:</strong><br>
                             <span class="badge bg-primary"><?php echo number_format($barang_selected['STOCK_SEKARANG'], 0, ',', '.'); ?> <?php echo htmlspecialchars($barang_selected['SATUAN']); ?></span>
                         </div>
@@ -325,33 +368,15 @@ $active_page = 'laporan';
                     <div class="stat-card info">
                         <div class="stat-value">
                             <?php 
-                            // Stock akhir periode = stock awal + (jumlah perubahan dari semua history dalam periode)
-                            $stock_akhir_periode = $stock_awal;
-                            foreach ($stock_history as $h) {
-                                $stock_akhir_periode += $h['JUMLAH_PERUBAHAN'];
-                            }
-                            
-                            // Jika periode sampai hari ini atau masa depan, cek apakah ada history setelah tanggal_sampai
-                            $tanggal_sampai_date = new DateTime($tanggal_sampai);
-                            $hari_ini = new DateTime();
-                            $hari_ini->setTime(0, 0, 0); // Set ke awal hari untuk perbandingan yang akurat
-                            
-                            if ($tanggal_sampai_date >= $hari_ini) {
-                                // Periode sampai hari ini atau masa depan, cek apakah ada history setelah tanggal_sampai
-                                $query_check_after = "SELECT COUNT(*) as TOTAL 
-                                                    FROM STOCK_HISTORY 
-                                                    WHERE KD_BARANG = ? AND KD_LOKASI = ? 
-                                                    AND DATE(WAKTU_CHANGE) > ?";
-                                $stmt_check_after = $conn->prepare($query_check_after);
-                                $stmt_check_after->bind_param("sss", $kd_barang, $kd_lokasi, $tanggal_sampai);
-                                $stmt_check_after->execute();
-                                $result_check_after = $stmt_check_after->get_result();
-                                $has_history_after = intval($result_check_after->fetch_assoc()['TOTAL']) > 0;
-                                
-                                if (!$has_history_after) {
-                                    // Tidak ada history setelah tanggal_sampai, gunakan stock saat ini
-                                    $stock_akhir_periode = intval($barang_selected['STOCK_SEKARANG']);
-                                }
+                            // Stock akhir periode = JUMLAH_AKHIR dari data terakhir dalam periode (data dengan waktu terakhir)
+                            $stock_akhir_periode = 0;
+                            if (count($stock_history) > 0) {
+                                // Query sudah di-sort DESC berdasarkan WAKTU_CHANGE, jadi data pertama adalah yang terakhir
+                                // Ambil JUMLAH_AKHIR dari data dengan waktu terakhir
+                                $stock_akhir_periode = intval($stock_history[0]['JUMLAH_AKHIR']);
+                            } else {
+                                // Jika tidak ada history dalam periode, gunakan stock awal
+                                $stock_akhir_periode = $stock_awal;
                             }
                             
                             echo number_format($stock_akhir_periode, 0, ',', '.');
@@ -433,6 +458,8 @@ $active_page = 'laporan';
     <!-- DataTables JS -->
     <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+    <!-- Flatpickr JS -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <!-- Sidebar Script -->
     <script src="includes/sidebar.js"></script>
     <!-- SweetAlert2 JS -->
@@ -440,6 +467,57 @@ $active_page = 'laporan';
     
     <script>
         $(document).ready(function() {
+            // Inisialisasi Flatpickr dengan format dd/mm/yyyy
+            flatpickr("#tanggal_dari", {
+                dateFormat: "d/m/Y",
+                locale: {
+                    firstDayOfWeek: 1,
+                    weekdays: {
+                        shorthand: ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"],
+                        longhand: ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
+                    },
+                    months: {
+                        shorthand: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"],
+                        longhand: ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+                    }
+                }
+            });
+            
+            flatpickr("#tanggal_sampai", {
+                dateFormat: "d/m/Y",
+                locale: {
+                    firstDayOfWeek: 1,
+                    weekdays: {
+                        shorthand: ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"],
+                        longhand: ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
+                    },
+                    months: {
+                        shorthand: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"],
+                        longhand: ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+                    }
+                }
+            });
+            
+            // Konversi dd/mm/yyyy ke yyyy-mm-dd saat submit
+            $('form').on('submit', function(e) {
+                const tanggalDari = $('#tanggal_dari').val();
+                const tanggalSampai = $('#tanggal_sampai').val();
+                
+                // Konversi format sebelum submit
+                if (tanggalDari) {
+                    const partsDari = tanggalDari.split('/');
+                    if (partsDari.length === 3) {
+                        $('#tanggal_dari').val(partsDari[2] + '-' + partsDari[1] + '-' + partsDari[0]);
+                    }
+                }
+                if (tanggalSampai) {
+                    const partsSampai = tanggalSampai.split('/');
+                    if (partsSampai.length === 3) {
+                        $('#tanggal_sampai').val(partsSampai[2] + '-' + partsSampai[1] + '-' + partsSampai[0]);
+                    }
+                }
+            });
+            
             // Disable DataTables error reporting
             $.fn.dataTable.ext.errMode = 'none';
             

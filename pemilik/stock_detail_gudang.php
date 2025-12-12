@@ -327,6 +327,23 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
             // Hitung nilai yang sudah di-round up (untuk disimpan)
             $kuantitas_poq_dus_rounded = ceil($kuantitas_poq_dus_raw);
             
+            // 8. Query untuk mendapatkan supplier terakhir dengan data lengkap
+            $query_supplier_last = "SELECT pb.KD_SUPPLIER, 
+                                       COALESCE(ms.KD_SUPPLIER, '-') as SUPPLIER_KD,
+                                       COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER,
+                                       COALESCE(ms.ALAMAT_SUPPLIER, '-') as ALAMAT_SUPPLIER
+                               FROM PESAN_BARANG pb
+                               LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
+                               WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.KD_SUPPLIER IS NOT NULL 
+                               ORDER BY pb.WAKTU_PESAN DESC 
+                               LIMIT 1";
+            $stmt_supplier_last = $conn->prepare($query_supplier_last);
+            $stmt_supplier_last->bind_param("ss", $kd_barang_ajax, $kd_lokasi_ajax);
+            $stmt_supplier_last->execute();
+            $result_supplier_last = $stmt_supplier_last->get_result();
+            $last_supplier_data = $result_supplier_last->num_rows > 0 ? $result_supplier_last->fetch_assoc() : null;
+            $last_supplier = $last_supplier_data ? $last_supplier_data['KD_SUPPLIER'] : null;
+            
             header('Content-Type: application/json');
             echo json_encode([
                 'success' => true,
@@ -348,7 +365,8 @@ if (isset($_GET['get_poq_data']) && $_GET['get_poq_data'] == '1') {
                 'has_interval' => $has_interval,
                 'total_dus_year' => $total_dus_terjual,
                 'total_biaya_gudang_tahun' => $total_biaya_gudang_tahun,
-                'total_avg_stok_dus' => $total_avg_stok_dus
+                'total_avg_stok_dus' => $total_avg_stok_dus,
+                'last_supplier' => $last_supplier ?? null
             ]);
             exit();
         } catch (Exception $e) {
@@ -1530,8 +1548,33 @@ $active_page = 'stock';
                             $('#poq_kuantitas').css('color', '#000'); // Warna hitam
                         }
                         
-                        // Reset supplier dropdown
-                        $('#poq_supplier').val('');
+                        // Set supplier terakhir jika ada dan update format display
+                        var lastSupplierKd = response.last_supplier || null;
+                        
+                        // Update format semua option supplier
+                        $('#poq_supplier option').each(function() {
+                            var optionValue = $(this).val();
+                            var originalText = $(this).text();
+                            
+                            // Hapus prefix "(Pesan Terakhir) - " jika ada
+                            if (originalText.includes('(Pesan Terakhir) - ')) {
+                                originalText = originalText.replace('(Pesan Terakhir) - ', '');
+                            }
+                            
+                            // Jika ini supplier terakhir, tambahkan prefix
+                            if (optionValue && optionValue === lastSupplierKd) {
+                                $(this).text('(Pesan Terakhir) - ' + originalText);
+                            } else {
+                                $(this).text(originalText);
+                            }
+                        });
+                        
+                        // Auto-select supplier terakhir jika ada
+                        if (lastSupplierKd) {
+                            $('#poq_supplier').val(lastSupplierKd);
+                        } else {
+                            $('#poq_supplier').val('');
+                        }
                         
                         $('#modalHitungPOQ').modal('show');
                     } else {
@@ -1664,6 +1707,14 @@ $active_page = 'stock';
         
         // Reset form saat modal ditutup
         $('#modalHitungPOQ').on('hidden.bs.modal', function() {
+            // Reset supplier dropdown format
+            $('#poq_supplier option').each(function() {
+                var optionText = $(this).text();
+                if (optionText.includes('(Pesan Terakhir) - ')) {
+                    $(this).text(optionText.replace('(Pesan Terakhir) - ', ''));
+                }
+            });
+            
             $('#poq_kd_barang').val('');
             $('#poq_kd_lokasi').val('');
             $('#poq_kd_barang_display').val('');

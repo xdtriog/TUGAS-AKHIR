@@ -613,7 +613,7 @@ $active_page = 'perpindahan_barang';
                             <th>ID Transfer</th>
                             <th>Waktu</th>
                             <th>Lokasi Tujuan</th>
-                            <th>Total Dipesan (dus)</th>
+                            <th>Total Pesan Transfer (dus)</th>
                             <th>Status</th>
                             <th>Action</th>
                         </tr>
@@ -793,7 +793,7 @@ $active_page = 'perpindahan_barang';
                                     <th>Kategori</th>
                                     <th>Nama Barang</th>
                                     <th>Berat (gr)</th>
-                                    <th>Total Pesan (dus)</th>
+                                    <th>Total Pesan Transfer (dus)</th>
                                     <th>Batch</th>
                                     <th>Total Kirim (dus)</th>
                                     <th>Kirim Semua</th>

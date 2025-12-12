@@ -362,13 +362,17 @@ INSERT INTO `master_kategori_barang` (`KD_KATEGORI_BARANG`, `NAMA_KATEGORI`, `ST
 ('N9YZGVmr', 'Sosis', 'AKTIF');
 
 INSERT INTO `master_lokasi` (`KD_LOKASI`, `NAMA_LOKASI`, `TYPE_LOKASI`, `ALAMAT_LOKASI`, `MAX_STOCK_TOTAL`, `SATUAN`, `STATUS`) VALUES
-('GDNGj825', 'Gudang Pusat Bekasi', 'gudang', 'Jl. Narogong Km.12 Bekasi', 2000, 'DUS', 'AKTIF'),
-('TOKOeLig', 'Toko Bekasi Timur', 'toko', 'Ruko Harapan Indah Boulevard', 5000, 'PIECES', 'AKTIF');
+('GDNGj825', 'Gudang Pusat Blora', 'gudang', 'Jl. Gudang Blora No 1', 2000, 'DUS', 'AKTIF'),
+('TOKOeLig', 'Toko Blora', 'toko', 'Jl. Toko Blora No 1', 5000, 'PIECES', 'AKTIF'),
+('TOKOjtqG', 'Toko Rembang', 'toko', 'Jl. Toko Rembang No 1', 5000, 'PIECES', 'AKTIF'),
+('TOKOk3CZ', 'Toko Cepu', 'toko', 'Jl. Toko Cepu No 1', 5000, 'PIECES', 'AKTIF');
 
 INSERT INTO `users` (`ID_USERS`, `KD_LOKASI`, `NAMA`, `USERNAME`, `PASSWORD`, `STATUS`) VALUES
 ('GDNGj825', 'GDNGj825', 'Yudi', 'gudang1', 'password', 'AKTIF'),
 ('OWNR3f8x', NULL, 'Kevin', 'owner', 'password', 'AKTIF'),
-('TOKOeLig', 'TOKOeLig', 'Hendro', 'toko1', 'password', 'AKTIF');
+('TOKOeLig', 'TOKOeLig', 'Hendro', 'toko1', 'password', 'AKTIF'),
+('TOKOrvYu', 'TOKOjtqG', 'Farhan', 'toko3', 'password', 'AKTIF'),
+('TOKOu8EU', 'TOKOk3CZ', 'Amal', 'toko2', 'password', 'AKTIF');
 
 INSERT INTO `master_merek` (`KD_MEREK_BARANG`, `NAMA_MEREK`, `STATUS`) VALUES
 ('ckDceFJK', 'Fiesta', 'AKTIF'),
@@ -382,11 +386,15 @@ INSERT INTO `master_barang` (`KD_BARANG`, `KD_KATEGORI_BARANG`, `KD_SUPPLIER`, `
 ('4aCSBjQPd3TzFd90', 'cx7xRUzL', NULL, 'ckDceFJK', 'Fiesta Chicken Nugget', 250, 16000.00, 40000.00, 25, 'assets/images/barang/4aCSBjQPd3TzFd90_1764406049.webp', '2025-11-29 08:47:29', 'AKTIF'),
 ('W8r1LuGwd932W3Zq', 'N9YZGVmr', NULL, 'N6EKB1pQ', 'So Nice Sosis Ayam Keju', 50, 30000.00, 33000.00, 10, 'assets/images/barang/W8r1LuGwd932W3Zq_1764406076.jpeg', '2025-11-29 08:47:56', 'AKTIF');
 
-INSERT INTO `stock` (`KD_BARANG`, `KD_LOKASI`, `UPDATED_BY`, `JUMLAH_BARANG`, `JUMLAH_MIN_STOCK`, `JUMLAH_MAX_STOCK`, `SATUAN`, `LAST_UPDATED`) VALUES
-('4aCSBjQPd3TzFd90', 'GDNGj825', 'GDNGj825', 0, NULL, 100, 'DUS', '2025-11-29 08:46:55'),
-('4aCSBjQPd3TzFd90', 'TOKOeLig', 'TOKOeLig', 0, 30, 100, 'PIECES', '2025-11-29 08:47:06'),
-('W8r1LuGwd932W3Zq', 'GDNGj825', 'GDNGj825', 0, NULL, 30, 'DUS', '2025-11-29 08:46:55'),
-('W8r1LuGwd932W3Zq', 'TOKOeLig', 'TOKOeLig', 0, 10, 50, 'PIECES', '2025-11-29 08:47:06');
+INSERT INTO STOCK (KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_BARANG, JUMLAH_MIN_STOCK, JUMLAH_MAX_STOCK, SATUAN, LAST_UPDATED) VALUES
+('4aCSBjQPd3TzFd90', 'GDNGj825', 'GDNGj825', 0, 50, 200, 'DUS', '2025-12-12 12:13:39'),
+('4aCSBjQPd3TzFd90', 'TOKOeLig', 'TOKOeLig', 0, 100, 1000, 'PIECES', '2025-12-12 12:13:39'),
+('4aCSBjQPd3TzFd90', 'TOKOjtqG', 'TOKOrvYu', 0, 100, 1000, 'PIECES', '2025-12-12 12:13:39'),
+('4aCSBjQPd3TzFd90', 'TOKOk3CZ', 'TOKOu8EU', 0, 100, 1000, 'PIECES', '2025-12-12 12:13:39'),
+('W8r1LuGwd932W3Zq', 'GDNGj825', 'GDNGj825', 0, 10, 30, 'DUS', '2025-12-12 12:13:39'),
+('W8r1LuGwd932W3Zq', 'TOKOeLig', 'TOKOeLig', 0, 10, 50, 'PIECES', '2025-12-12 12:13:39'),
+('W8r1LuGwd932W3Zq', 'TOKOjtqG', 'TOKOrvYu', 0, 10, 50, 'PIECES', '2025-12-12 12:13:39'),
+('W8r1LuGwd932W3Zq', 'TOKOk3CZ', 'TOKOu8EU', 0, 10, 50, 'PIECES', '2025-12-12 12:13:39');
 
 INSERT INTO `master_tipe_biaya_operasional` (`KD_TIPE_BIAYA_OPERASIONAL`, `NAMA_TIPE_BIAYA_OPERASIONAL`) VALUES
 ('TBOPA71z', 'Listrik'),

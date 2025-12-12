@@ -182,10 +182,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         $query_barang = "SELECT 
             s.JUMLAH_BARANG as JUMLAH_SISTEM,
             s.SATUAN as SATUAN_STOCK,
+            mb.KD_BARANG,
+            mb.NAMA_BARANG,
+            mb.BERAT,
             mb.SATUAN_PERDUS,
-            mb.AVG_HARGA_BELI_PIECES
+            mb.AVG_HARGA_BELI_PIECES,
+            COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
+            COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI
         FROM STOCK s
         INNER JOIN MASTER_BARANG mb ON s.KD_BARANG = mb.KD_BARANG
+        LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
+        LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
         WHERE s.KD_BARANG = ? AND s.KD_LOKASI = ?";
         $stmt_barang = $conn->prepare($query_barang);
         if (!$stmt_barang) {
@@ -205,10 +212,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             throw new Exception('Data barang tidak ditemukan!');
         }
         
-        $barang_data = $result_barang->fetch_assoc();
-        $satuan_stock = $barang_data['SATUAN_STOCK'] ?? 'DUS';
-        $satuan_perdus = intval($barang_data['SATUAN_PERDUS'] ?? 1);
-        $avg_harga_beli = floatval($barang_data['AVG_HARGA_BELI_PIECES'] ?? 0);
+        $barang_info = $result_barang->fetch_assoc();
+        $satuan_stock = $barang_info['SATUAN_STOCK'] ?? 'DUS';
+        $satuan_perdus = intval($barang_info['SATUAN_PERDUS'] ?? 1);
+        $avg_harga_beli = floatval($barang_info['AVG_HARGA_BELI_PIECES'] ?? 0);
+        
+        // Simpan informasi barang untuk response
+        $barang_data = [
+            'kd_barang' => $barang_info['KD_BARANG'],
+            'nama_barang' => $barang_info['NAMA_BARANG'],
+            'merek' => $barang_info['NAMA_MEREK'],
+            'kategori' => $barang_info['NAMA_KATEGORI'],
+            'berat' => floatval($barang_info['BERAT'] ?? 0),
+            'satuan' => $satuan_stock
+        ];
         
         $opname_results = [];
         $total_selisih_dus = 0;
@@ -400,10 +417,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         echo json_encode([
             'success' => true,
             'message' => 'Stock opname berhasil disimpan!',
+            'barang' => $barang_data,
             'results' => $opname_results,
             'total_selisih_dus' => $total_selisih_dus,
             'total_selisih_pieces' => $total_selisih_pieces,
-            'total_uang' => $total_uang
+            'total_uang' => round($total_uang, 2)
         ]);
     } catch (Exception $e) {
         // Rollback transaksi
@@ -571,8 +589,6 @@ $active_page = 'stock_opname';
                             <th>Kategori Barang</th>
                             <th>Nama Barang</th>
                             <th>Berat (gr)</th>
-                            <th>Stock Sekarang</th>
-                            <th>Satuan</th>
                             <th>Waktu Terakhir Stock Opname</th>
                             <th>Action</th>
                         </tr>
@@ -586,8 +602,6 @@ $active_page = 'stock_opname';
                                     <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
                                     <td><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
-                                    <td><?php echo number_format($row['STOCK_SEKARANG'], 0, ',', '.'); ?></td>
-                                    <td><?php echo htmlspecialchars($row['SATUAN']); ?></td>
                                     <td><?php echo formatWaktuTerakhirOpname($row['WAKTU_TERAKHIR_OPNAME']); ?></td>
                                     <td>
                                         <button class="btn-view btn-sm" onclick="bukaModalOpname('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($row['NAMA_MEREK']); ?>', '<?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?>', '<?php echo htmlspecialchars($row['NAMA_BARANG']); ?>', <?php echo $row['BERAT']; ?>, <?php echo $row['STOCK_SEKARANG']; ?>, '<?php echo htmlspecialchars($row['SATUAN']); ?>')">Stock Opname</button>
@@ -596,7 +610,7 @@ $active_page = 'stock_opname';
                             <?php endwhile; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="9" class="text-center text-muted">Tidak ada data stock</td>
+                                <td colspan="7" class="text-center text-muted">Tidak ada data stock</td>
                             </tr>
                         <?php endif; ?>
                     </tbody>
@@ -694,7 +708,7 @@ $active_page = 'stock_opname';
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
                 order: [[0, 'asc']],
                 columnDefs: [
-                    { orderable: false, targets: [8] }
+                    { orderable: false, targets: [6] }
                 ],
                 scrollX: true,
                 autoWidth: false
@@ -853,13 +867,27 @@ $active_page = 'stock_opname';
                                 // Buat HTML untuk popup hasil
                                 var htmlContent = '<div class="text-start">';
                                 htmlContent += '<h6 class="mb-3">Hasil Stock Opname:</h6>';
+                                
+                                // Informasi Barang (di atas tabel)
+                                if (response.barang) {
+                                    htmlContent += '<div class="mb-3 p-3 bg-light rounded border">';
+                                    htmlContent += '<div class="row g-2">';
+                                    htmlContent += '<div class="col-md-3"><strong>Kode Barang:</strong><br>' + response.barang.kd_barang + '</div>';
+                                    htmlContent += '<div class="col-md-3"><strong>Merek:</strong><br>' + response.barang.merek + '</div>';
+                                    htmlContent += '<div class="col-md-3"><strong>Kategori:</strong><br>' + response.barang.kategori + '</div>';
+                                    htmlContent += '<div class="col-md-3"><strong>Berat:</strong><br>' + numberFormat(response.barang.berat) + ' gr</div>';
+                                    htmlContent += '<div class="col-md-12"><strong>Nama Barang:</strong><br>' + response.barang.nama_barang + '</div>';
+                                    htmlContent += '</div>';
+                                    htmlContent += '</div>';
+                                }
+                                
                                 htmlContent += '<div class="table-responsive">';
                                 htmlContent += '<table class="table table-sm table-bordered">';
                                 htmlContent += '<thead class="table-light"><tr>';
                                 htmlContent += '<th>ID Batch</th>';
-                                htmlContent += '<th class="text-end">Jumlah Sistem</th>';
-                                htmlContent += '<th class="text-end">Jumlah Sebenarnya</th>';
-                                htmlContent += '<th class="text-center">Selisih (Lebih/Kurang)</th>';
+                                htmlContent += '<th class="text-end">Jumlah Sistem (' + (response.barang ? response.barang.satuan : 'dus') + ')</th>';
+                                htmlContent += '<th class="text-end">Jumlah Sebenarnya (' + (response.barang ? response.barang.satuan : 'dus') + ')</th>';
+                                htmlContent += '<th class="text-center">Selisih (' + (response.barang ? response.barang.satuan : 'dus') + ')</th>';
                                 htmlContent += '<th class="text-end">Nilai (Rp)</th>';
                                 htmlContent += '</tr></thead><tbody>';
                                 
@@ -867,18 +895,18 @@ $active_page = 'stock_opname';
                                     var selisihClass = result.selisih > 0 ? 'text-success fw-bold' : (result.selisih < 0 ? 'text-danger fw-bold' : 'text-muted');
                                     var selisihText = '';
                                     if (result.selisih > 0) {
-                                        selisihText = '<span class="badge bg-success">+ ' + numberFormat(result.selisih) + ' dus (LEBIH)</span>';
+                                        selisihText = '<span class="badge bg-success">+ ' + numberFormat(result.selisih) + ' (LEBIH)</span>';
                                     } else if (result.selisih < 0) {
-                                        selisihText = '<span class="badge bg-danger">' + numberFormat(result.selisih) + ' dus (KURANG)</span>';
+                                        selisihText = '<span class="badge bg-danger">' + numberFormat(result.selisih) + ' (KURANG)</span>';
                                     } else {
-                                        selisihText = '<span class="badge bg-secondary">0 dus (SESUAI)</span>';
+                                        selisihText = '<span class="badge bg-secondary">0 (SESUAI)</span>';
                                     }
-                                    var uangText = result.uang >= 0 ? 'Rp. ' + numberFormat(result.uang) : '-Rp. ' + numberFormat(Math.abs(result.uang));
+                                    var uangText = 'Rp. ' + numberFormat(result.uang);
                                     
                                     htmlContent += '<tr>';
                                     htmlContent += '<td>' + result.id_pesan_barang + '</td>';
-                                    htmlContent += '<td class="text-end">' + numberFormat(result.jumlah_sistem) + ' dus</td>';
-                                    htmlContent += '<td class="text-end">' + numberFormat(result.jumlah_sebenarnya) + ' dus</td>';
+                                    htmlContent += '<td class="text-end">' + numberFormat(result.jumlah_sistem) + '</td>';
+                                    htmlContent += '<td class="text-end">' + numberFormat(result.jumlah_sebenarnya) + '</td>';
                                     htmlContent += '<td class="text-center ' + selisihClass + '">' + selisihText + '</td>';
                                     htmlContent += '<td class="text-end ' + selisihClass + '">' + uangText + '</td>';
                                     htmlContent += '</tr>';
@@ -891,13 +919,13 @@ $active_page = 'stock_opname';
                                 var totalSelisihClass = response.total_selisih_dus > 0 ? 'text-success fw-bold' : (response.total_selisih_dus < 0 ? 'text-danger fw-bold' : 'text-muted');
                                 var totalSelisihText = '';
                                 if (response.total_selisih_dus > 0) {
-                                    totalSelisihText = '<span class="badge bg-success">+ ' + numberFormat(response.total_selisih_dus) + ' dus (LEBIH)</span>';
+                                    totalSelisihText = '<span class="badge bg-success">+ ' + numberFormat(response.total_selisih_dus) + ' (LEBIH)</span>';
                                 } else if (response.total_selisih_dus < 0) {
-                                    totalSelisihText = '<span class="badge bg-danger">' + numberFormat(response.total_selisih_dus) + ' dus (KURANG)</span>';
+                                    totalSelisihText = '<span class="badge bg-danger">' + numberFormat(response.total_selisih_dus) + ' (KURANG)</span>';
                                 } else {
-                                    totalSelisihText = '<span class="badge bg-secondary">0 dus (SESUAI)</span>';
+                                    totalSelisihText = '<span class="badge bg-secondary">0 (SESUAI)</span>';
                                 }
-                                var totalUangText = response.total_uang >= 0 ? 'Rp. ' + numberFormat(response.total_uang) : '-Rp. ' + numberFormat(Math.abs(response.total_uang));
+                                var totalUangText = 'Rp. ' + numberFormat(response.total_uang);
                                 
                                 htmlContent += '<div class="mt-3 p-3 bg-light rounded border">';
                                 htmlContent += '<div class="mb-2"><strong>Total Selisih: </strong>' + totalSelisihText + '</div>';

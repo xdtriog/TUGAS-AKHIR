@@ -145,10 +145,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     $total_masuk = isset($_POST['total_masuk']) ? (int)$_POST['total_masuk'] : 0;
     $harga_pesan_dus = isset($_POST['harga_pesan_dus']) ? floatval($_POST['harga_pesan_dus']) : 0;
     $biaya_pengiriman = isset($_POST['biaya_pengiriman']) ? floatval($_POST['biaya_pengiriman']) : 0;
-    $tgl_expired = isset($_POST['tgl_expired']) ? trim($_POST['tgl_expired']) : null;
+    $tgl_expired = isset($_POST['tgl_expired']) ? trim($_POST['tgl_expired']) : '';
     
-    if (empty($id_pesan) || $jumlah_dikirim < 0 || $jumlah_ditolak < 0 || $total_masuk < 0 || $harga_pesan_dus < 0 || $biaya_pengiriman < 0) {
-        echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
+    if (empty($id_pesan) || $jumlah_dikirim < 0 || $jumlah_ditolak < 0 || $total_masuk < 0 || $harga_pesan_dus < 0 || $biaya_pengiriman < 0 || empty($tgl_expired)) {
+        echo json_encode(['success' => false, 'message' => 'Data tidak valid! Semua field wajib diisi!']);
         exit();
     }
     
@@ -187,40 +187,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
         $jumlah_tiba_dus = $jumlah_dikirim;
         
         // Update status PESAN_BARANG menjadi SELESAI dan set WAKTU_SELESAI, HARGA_PESAN_BARANG_DUS, BIAYA_PENGIRIMAAN, dan SISA_STOCK_DUS
-        if (!empty($tgl_expired)) {
-            $update_pesan = "UPDATE PESAN_BARANG 
-                            SET STATUS = 'SELESAI', 
-                                WAKTU_SELESAI = CURRENT_TIMESTAMP,
-                                JUMLAH_TIBA_DUS = ?,
-                                TOTAL_MASUK_DUS = ?,
-                                JUMLAH_DITOLAK_DUS = ?,
-                                HARGA_PESAN_BARANG_DUS = ?,
-                                BIAYA_PENGIRIMAAN = ?,
-                                SISA_STOCK_DUS = ?,
-                                TGL_EXPIRED = ?
-                            WHERE ID_PESAN_BARANG = ?";
-            $stmt_update = $conn->prepare($update_pesan);
-            if (!$stmt_update) {
-                throw new Exception('Gagal prepare query update pesan barang: ' . $conn->error);
-            }
-            $stmt_update->bind_param("iiiddiss", $jumlah_tiba_dus, $total_masuk, $jumlah_ditolak, $harga_pesan_dus, $biaya_pengiriman, $total_masuk, $tgl_expired, $id_pesan);
-        } else {
-            $update_pesan = "UPDATE PESAN_BARANG 
-                            SET STATUS = 'SELESAI', 
-                                WAKTU_SELESAI = CURRENT_TIMESTAMP,
-                                JUMLAH_TIBA_DUS = ?,
-                                TOTAL_MASUK_DUS = ?,
-                                JUMLAH_DITOLAK_DUS = ?,
-                                HARGA_PESAN_BARANG_DUS = ?,
-                                BIAYA_PENGIRIMAAN = ?,
-                                SISA_STOCK_DUS = ?
-                            WHERE ID_PESAN_BARANG = ?";
-            $stmt_update = $conn->prepare($update_pesan);
-            if (!$stmt_update) {
-                throw new Exception('Gagal prepare query update pesan barang: ' . $conn->error);
-            }
-            $stmt_update->bind_param("iiiddis", $jumlah_tiba_dus, $total_masuk, $jumlah_ditolak, $harga_pesan_dus, $biaya_pengiriman, $total_masuk, $id_pesan);
+        // tgl_expired sekarang mandatory, jadi selalu gunakan query dengan TGL_EXPIRED
+        $update_pesan = "UPDATE PESAN_BARANG 
+                        SET STATUS = 'SELESAI', 
+                            WAKTU_SELESAI = CURRENT_TIMESTAMP,
+                            JUMLAH_TIBA_DUS = ?,
+                            TOTAL_MASUK_DUS = ?,
+                            JUMLAH_DITOLAK_DUS = ?,
+                            HARGA_PESAN_BARANG_DUS = ?,
+                            BIAYA_PENGIRIMAAN = ?,
+                            SISA_STOCK_DUS = ?,
+                            TGL_EXPIRED = ?
+                        WHERE ID_PESAN_BARANG = ?";
+        $stmt_update = $conn->prepare($update_pesan);
+        if (!$stmt_update) {
+            throw new Exception('Gagal prepare query update pesan barang: ' . $conn->error);
         }
+        $stmt_update->bind_param("iiiddiss", $jumlah_tiba_dus, $total_masuk, $jumlah_ditolak, $harga_pesan_dus, $biaya_pengiriman, $total_masuk, $tgl_expired, $id_pesan);
         if (!$stmt_update->execute()) {
             throw new Exception('Gagal mengupdate data pesan barang: ' . $stmt_update->error);
         }
@@ -498,11 +481,10 @@ $active_page = 'barang_masuk';
                             <th>Merek Barang</th>
                             <th>Kategori Barang</th>
                             <th>Nama Barang</th>
-                            <th>Berat</th>
-                            <th>Jumlah Pesan</th>
-                            <th>Total Masuk</th>
-                            <th>Jumlah Ditolak</th>
-                            <th>Satuan</th>
+                            <th>Berat (gr)</th>
+                            <th>Jumlah Pesan (dus)</th>
+                            <th>Total Masuk (dus)</th>
+                            <th>Jumlah Ditolak (dus)</th>
                             <th>Status</th>
                             <th>Action</th>
                         </tr>
@@ -549,7 +531,6 @@ $active_page = 'barang_masuk';
                                     <td><?php echo number_format($row['JUMLAH_PESAN_BARANG_DUS'], 0, ',', '.'); ?></td>
                                     <td><?php echo $row['TOTAL_MASUK_DUS'] ? number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.') : '-'; ?></td>
                                     <td><?php echo $row['JUMLAH_DITOLAK_DUS'] ? number_format($row['JUMLAH_DITOLAK_DUS'], 0, ',', '.') : '-'; ?></td>
-                                    <td><?php echo htmlspecialchars($row['SATUAN'] ?? 'Dus'); ?></td>
                                     <td data-order="<?php 
                                         $status_text = '';
                                         $status_class = '';
@@ -578,7 +559,7 @@ $active_page = 'barang_masuk';
                                         <?php if ($row['STATUS'] == 'DIKIRIM'): ?>
                                             <button class="btn btn-success btn-sm" onclick="validasiBarang('<?php echo htmlspecialchars($row['ID_PESAN_BARANG']); ?>')">Validasi</button>
                                         <?php elseif ($row['STATUS'] == 'SELESAI'): ?>
-                                            <span class="text-muted">-</span>
+                                            <button class="btn btn-info btn-sm" onclick="cetakLabelBatch('<?php echo htmlspecialchars($row['ID_PESAN_BARANG']); ?>')">Cetak Label Batch</button>
                                         <?php else: ?>
                                             <span class="text-muted">-</span>
                                         <?php endif; ?>
@@ -653,8 +634,8 @@ $active_page = 'barang_masuk';
                                 <input type="text" class="form-control form-control-sm" id="validasi_biaya_pengiriman" name="biaya_pengiriman" required>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label fw-bold small">Tanggal Expired</label>
-                                <input type="date" class="form-control form-control-sm" id="validasi_tgl_expired" name="tgl_expired">
+                                <label class="form-label fw-bold small">Tanggal Expired <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control form-control-sm" id="validasi_tgl_expired" name="tgl_expired" required>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label fw-bold small">Total Masuk (dus)</label>
@@ -695,10 +676,10 @@ $active_page = 'barang_masuk';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[10, 'asc'], [2, 'asc']], // Sort by Status (priority) then Waktu
+                order: [[11, 'asc'], [2, 'asc']], // Sort by Status (priority) then Waktu
                 columnDefs: [
-                    { orderable: false, targets: 13 }, // Disable sorting on Action column
-                    { type: 'num', targets: [10, 2] } // Status and Waktu columns use numeric sorting
+                    { orderable: false, targets: 12 }, // Disable sorting on Action column
+                    { type: 'num', targets: [11, 2] } // Status (col 11) and Waktu (col 2) columns use numeric sorting
                 ],
                 scrollX: true,
                 autoWidth: false,
@@ -955,7 +936,7 @@ $active_page = 'barang_masuk';
                     total_masuk: totalMasuk,
                     harga_pesan_dus: hargaPesanDus,
                     biaya_pengiriman: biayaPengiriman,
-                    tgl_expired: $('#validasi_tgl_expired').val() || ''
+                    tgl_expired: $('#validasi_tgl_expired').val()
                 },
                 dataType: 'json',
                 success: function(response) {
@@ -965,9 +946,17 @@ $active_page = 'barang_masuk';
                             title: 'Berhasil!',
                             text: response.message,
                             confirmButtonColor: '#28a745',
-                            timer: 1500,
+                            showCancelButton: true,
+                            confirmButtonText: 'Cetak Label Batch',
+                            cancelButtonText: 'Tutup',
+                            timer: 5000,
                             timerProgressBar: true
-                        }).then(() => {
+                        }).then((result) => {
+                            if (result.isConfirmed) {
+                                // Buka halaman cetak label batch (jumlah otomatis sesuai TOTAL_MASUK_DUS)
+                                var idPesan = $('#validasi_id_pesan').val();
+                                window.open('cetak_label_batch.php?id_pesan=' + encodeURIComponent(idPesan), '_blank');
+                            }
                             location.reload();
                         });
                     } else {
@@ -1008,6 +997,11 @@ $active_page = 'barang_masuk';
                     });
                 }
             });
+        }
+        
+        function cetakLabelBatch(idPesan) {
+            // Langsung buka halaman cetak (jumlah otomatis sesuai TOTAL_MASUK_DUS)
+            window.open('cetak_label_batch.php?id_pesan=' + encodeURIComponent(idPesan), '_blank');
         }
     </script>
 </body>

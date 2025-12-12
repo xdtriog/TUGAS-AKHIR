@@ -182,7 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 'jumlah_sistem' => $jumlah_sistem_pieces,
                 'jumlah_sebenarnya' => $jumlah_sebenarnya_pieces,
                 'selisih' => $selisih_pieces,
-                'uang' => $uang_barang
+                'uang' => round($uang_barang, 2)
             ];
             
             $total_selisih_pieces += $selisih_pieces;
@@ -197,7 +197,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             'message' => 'Stock opname berhasil disimpan!',
             'results' => $opname_results,
             'total_selisih_pieces' => $total_selisih_pieces,
-            'total_uang' => $total_uang
+            'total_uang' => round($total_uang, 2)
         ]);
     } catch (Exception $e) {
         // Rollback transaksi
@@ -364,8 +364,6 @@ $active_page = 'stock_opname';
                             <th>Kategori Barang</th>
                             <th>Nama Barang</th>
                             <th>Berat (gr)</th>
-                            <th>Stock Sekarang</th>
-                            <th>Satuan</th>
                             <th>Waktu Terakhir Stock Opname</th>
                         </tr>
                     </thead>
@@ -378,14 +376,12 @@ $active_page = 'stock_opname';
                                     <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
                                     <td><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
-                                    <td><?php echo number_format($row['STOCK_SEKARANG'], 0, ',', '.'); ?></td>
-                                    <td><?php echo htmlspecialchars($row['SATUAN']); ?></td>
                                     <td><?php echo formatWaktuTerakhirOpname($row['WAKTU_TERAKHIR_OPNAME']); ?></td>
                                 </tr>
                             <?php endwhile; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="8" class="text-center text-muted">Tidak ada data stock</td>
+                                <td colspan="6" class="text-center text-muted">Tidak ada data stock</td>
                             </tr>
                         <?php endif; ?>
                     </tbody>
@@ -411,11 +407,12 @@ $active_page = 'stock_opname';
                                 <table class="table table-sm table-bordered table-barang-opname">
                                     <thead class="table-light">
                                         <tr>
-                                            <th style="width: 15%;">Kode Barang</th>
-                                            <th style="width: 18%;">Merek</th>
-                                            <th style="width: 18%;">Kategori</th>
-                                            <th style="width: 24%;">Nama Barang</th>
-                                            <th style="width: 25%;">Jumlah Sebenarnya (pieces) <span class="text-danger">*</span></th>
+                                            <th style="width: 12%;">Kode Barang</th>
+                                            <th style="width: 15%;">Merek</th>
+                                            <th style="width: 15%;">Kategori</th>
+                                            <th style="width: 20%;">Nama Barang</th>
+                                            <th style="width: 10%;">Berat (gr)</th>
+                                            <th style="width: 28%;">Jumlah Sebenarnya (pieces) <span class="text-danger">*</span></th>
                                         </tr>
                                     </thead>
                                     <tbody id="tbodyBarang">
@@ -429,6 +426,7 @@ $active_page = 'stock_opname';
                                                 <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
                                                 <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
                                                 <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
+                                                <td class="text-center"><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
                                                 <td>
                                                     <input type="number" class="form-control form-control-sm text-end" 
                                                         name="jumlah_sebenarnya_<?php echo htmlspecialchars($row['KD_BARANG']); ?>" 
@@ -443,7 +441,7 @@ $active_page = 'stock_opname';
                                         else: 
                                         ?>
                                             <tr>
-                                                <td colspan="5" class="text-center text-muted">Tidak ada data barang</td>
+                                                <td colspan="6" class="text-center text-muted">Tidak ada data barang</td>
                                             </tr>
                                         <?php endif; ?>
                                     </tbody>
@@ -557,10 +555,12 @@ $active_page = 'stock_opname';
                                 htmlContent += '<table class="table table-sm table-bordered">';
                                 htmlContent += '<thead class="table-light"><tr>';
                                 htmlContent += '<th>Kode Barang</th>';
+                                htmlContent += '<th>Merek</th>';
+                                htmlContent += '<th>Kategori</th>';
                                 htmlContent += '<th>Nama Barang</th>';
-                                htmlContent += '<th class="text-end">Jumlah Sistem</th>';
-                                htmlContent += '<th class="text-end">Jumlah Sebenarnya</th>';
-                                htmlContent += '<th class="text-center">Selisih (Lebih/Kurang)</th>';
+                                htmlContent += '<th class="text-end">Jumlah Sistem (pieces)</th>';
+                                htmlContent += '<th class="text-end">Jumlah Sebenarnya (pieces)</th>';
+                                htmlContent += '<th class="text-center">Selisih (pieces)</th>';
                                 htmlContent += '<th class="text-end">Nilai (Rp)</th>';
                                 htmlContent += '</tr></thead><tbody>';
                                 
@@ -568,19 +568,21 @@ $active_page = 'stock_opname';
                                     var selisihClass = result.selisih > 0 ? 'text-success fw-bold' : (result.selisih < 0 ? 'text-danger fw-bold' : 'text-muted');
                                     var selisihText = '';
                                     if (result.selisih > 0) {
-                                        selisihText = '<span class="badge bg-success">+ ' + numberFormat(result.selisih) + ' pieces (LEBIH)</span>';
+                                        selisihText = '<span class="badge bg-success">+ ' + numberFormat(result.selisih) + ' (LEBIH)</span>';
                                     } else if (result.selisih < 0) {
-                                        selisihText = '<span class="badge bg-danger">' + numberFormat(result.selisih) + ' pieces (KURANG)</span>';
+                                        selisihText = '<span class="badge bg-danger">' + numberFormat(result.selisih) + ' (KURANG)</span>';
                                     } else {
-                                        selisihText = '<span class="badge bg-secondary">0 pieces (SESUAI)</span>';
+                                        selisihText = '<span class="badge bg-secondary">0 (SESUAI)</span>';
                                     }
-                                    var uangText = result.uang >= 0 ? 'Rp. ' + numberFormat(result.uang) : '-Rp. ' + numberFormat(Math.abs(result.uang));
+                                    var uangText = 'Rp. ' + numberFormat(result.uang);
                                     
                                     htmlContent += '<tr>';
                                     htmlContent += '<td>' + result.kd_barang + '</td>';
+                                    htmlContent += '<td>' + (result.merek || '-') + '</td>';
+                                    htmlContent += '<td>' + (result.kategori || '-') + '</td>';
                                     htmlContent += '<td>' + result.nama_barang + '</td>';
-                                    htmlContent += '<td class="text-end">' + numberFormat(result.jumlah_sistem) + ' pieces</td>';
-                                    htmlContent += '<td class="text-end">' + numberFormat(result.jumlah_sebenarnya) + ' pieces</td>';
+                                    htmlContent += '<td class="text-end">' + numberFormat(result.jumlah_sistem) + '</td>';
+                                    htmlContent += '<td class="text-end">' + numberFormat(result.jumlah_sebenarnya) + '</td>';
                                     htmlContent += '<td class="text-center ' + selisihClass + '">' + selisihText + '</td>';
                                     htmlContent += '<td class="text-end ' + selisihClass + '">' + uangText + '</td>';
                                     htmlContent += '</tr>';
@@ -593,13 +595,13 @@ $active_page = 'stock_opname';
                                 var totalSelisihClass = response.total_selisih_pieces > 0 ? 'text-success fw-bold' : (response.total_selisih_pieces < 0 ? 'text-danger fw-bold' : 'text-muted');
                                 var totalSelisihText = '';
                                 if (response.total_selisih_pieces > 0) {
-                                    totalSelisihText = '<span class="badge bg-success">+ ' + numberFormat(response.total_selisih_pieces) + ' pieces (LEBIH)</span>';
+                                    totalSelisihText = '<span class="badge bg-success">+ ' + numberFormat(response.total_selisih_pieces) + ' (LEBIH)</span>';
                                 } else if (response.total_selisih_pieces < 0) {
-                                    totalSelisihText = '<span class="badge bg-danger">' + numberFormat(response.total_selisih_pieces) + ' pieces (KURANG)</span>';
+                                    totalSelisihText = '<span class="badge bg-danger">' + numberFormat(response.total_selisih_pieces) + ' (KURANG)</span>';
                                 } else {
-                                    totalSelisihText = '<span class="badge bg-secondary">0 pieces (SESUAI)</span>';
+                                    totalSelisihText = '<span class="badge bg-secondary">0 (SESUAI)</span>';
                                 }
-                                var totalUangText = response.total_uang >= 0 ? 'Rp. ' + numberFormat(response.total_uang) : '-Rp. ' + numberFormat(Math.abs(response.total_uang));
+                                var totalUangText = 'Rp. ' + numberFormat(response.total_uang);
                                 
                                 htmlContent += '<div class="mt-3 p-3 bg-light rounded border">';
                                 htmlContent += '<div class="mb-2"><strong>Total Selisih: </strong>' + totalSelisihText + '</div>';
@@ -672,7 +674,38 @@ $active_page = 'stock_opname';
         }
 
         function numberFormat(num) {
-            return num ? num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.') : '0';
+            if (!num && num !== 0) return '0';
+            
+            // Konversi ke number jika string
+            var number = typeof num === 'string' ? parseFloat(num) : num;
+            
+            // Cek jika bukan angka valid
+            if (isNaN(number)) return '0';
+            
+            // Pisahkan bagian negatif, integer, dan desimal
+            var isNegative = number < 0;
+            var absNumber = Math.abs(number);
+            
+            // Pisahkan integer dan desimal
+            var parts = absNumber.toString().split('.');
+            var integerPart = parts[0] || '0';
+            var decimalPart = parts[1] || '';
+            
+            // Format integer dengan titik sebagai pemisah ribuan
+            var formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            
+            // Gabungkan dengan desimal jika ada
+            var result = formattedInteger;
+            if (decimalPart) {
+                result += ',' + decimalPart;
+            }
+            
+            // Tambahkan tanda negatif jika perlu
+            if (isNegative) {
+                result = '-' + result;
+            }
+            
+            return result;
         }
 
         // Reset modal saat ditutup

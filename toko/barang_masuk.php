@@ -684,7 +684,7 @@ $active_page = 'barang_masuk';
                             <th>ID Transfer</th>
                             <th>Waktu</th>
                             <th>Lokasi Asal</th>
-                            <th>Total Dipesan (dus)</th>
+                            <th>Total Pesan Transfer (dus)</th>
                             <th>Status</th>
                             <th>Action</th>
                         </tr>
@@ -825,15 +825,15 @@ $active_page = 'barang_masuk';
                                     <th>Merek</th>
                                     <th>Kategori</th>
                                     <th>Nama Barang</th>
-                                    <th>Jumlah Pesan (dus)</th>
-                                    <th>Jumlah Dikirim (dus)</th>
+                                    <th>Total Pesan Transfer (dus)</th>
+                                    <th>Total Kirim (dus)</th>
                                     <th>Batch</th>
                                     <th>Total Masuk (dus)</th>
                                     <th>Jumlah per Dus</th>
                                     <th>Total Masuk (pieces)</th>
                                     <th>Stock Sekarang (pieces)</th>
                                     <th>Jumlah Stock Akhir (pieces)</th>
-                                    <th>Tiba Semua</th>
+                                    <th>Diterima Semua</th>
                                 </tr>
                             </thead>
                             <tbody id="tbodyValidasiMasuk">
@@ -1019,7 +1019,7 @@ $active_page = 'barang_masuk';
         }
         
         function attachValidasiMasukEventListeners() {
-            // Event listener untuk checkbox "Tiba Semua"
+            // Event listener untuk checkbox "Diterima Semua"
             $(document).off('change', '.diterima-semua').on('change', '.diterima-semua', function() {
                 var index = $(this).data('index');
                 var idDetail = $(this).closest('tr').data('id-detail');
@@ -1068,7 +1068,7 @@ $active_page = 'barang_masuk';
                 }
                 $ditolakInput.attr('max', jumlahTiba);
                 
-                // Update checkbox "Tiba Semua"
+                // Update checkbox "Diterima Semua"
                 updateCheckboxDiterimaSemua(index);
                 
                 calculateValidasiMasuk(index);

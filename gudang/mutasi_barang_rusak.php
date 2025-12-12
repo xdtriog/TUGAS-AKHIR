@@ -457,11 +457,6 @@ $active_page = 'mutasi_barang_rusak';
             <?php endif; ?>
         </div>
 
-        <!-- Button Lihat Riwayat Mutasi -->
-        <div class="mb-3">
-            <button class="btn-view btn-sm" onclick="lihatRiwayatMutasi()">Lihat Riwayat Mutasi</button>
-        </div>
-
         <!-- Table Mutasi Barang Rusak -->
         <div class="table-section">
             <div class="table-responsive">
@@ -473,8 +468,6 @@ $active_page = 'mutasi_barang_rusak';
                             <th>Kategori Barang</th>
                             <th>Nama Barang</th>
                             <th>Berat (gr)</th>
-                            <th>Stock Sekarang</th>
-                            <th>Satuan</th>
                             <th>Waktu Terakhir Mutasi Barang Rusak</th>
                             <th>Action</th>
                         </tr>
@@ -488,8 +481,6 @@ $active_page = 'mutasi_barang_rusak';
                                     <td><?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
                                     <td><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
-                                    <td><?php echo number_format($row['STOCK_SEKARANG'], 0, ',', '.'); ?></td>
-                                    <td><?php echo htmlspecialchars($row['SATUAN']); ?></td>
                                     <td><?php echo formatWaktuTerakhirMutasi($row['WAKTU_TERAKHIR_MUTASI']); ?></td>
                                     <td>
                                         <button class="btn-view btn-sm" onclick="bukaModalMutasi('<?php echo htmlspecialchars($row['KD_BARANG']); ?>', '<?php echo htmlspecialchars($row['NAMA_MEREK']); ?>', '<?php echo htmlspecialchars($row['NAMA_KATEGORI']); ?>', '<?php echo htmlspecialchars($row['NAMA_BARANG']); ?>', <?php echo $row['BERAT']; ?>, <?php echo $row['STOCK_SEKARANG']; ?>, '<?php echo htmlspecialchars($row['SATUAN']); ?>')">Mutasi</button>
@@ -498,7 +489,7 @@ $active_page = 'mutasi_barang_rusak';
                             <?php endwhile; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="9" class="text-center text-muted">Tidak ada data stock</td>
+                                <td colspan="7" class="text-center text-muted">Tidak ada data stock</td>
                             </tr>
                         <?php endif; ?>
                     </tbody>
@@ -599,7 +590,7 @@ $active_page = 'mutasi_barang_rusak';
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
                 order: [[0, 'asc']], // Sort by Kode Barang ascending
                 columnDefs: [
-                    { orderable: false, targets: [8] } // Disable sorting on Action column
+                    { orderable: false, targets: [6] } // Disable sorting on Action column
                 ],
                 scrollX: true,
                 autoWidth: false
@@ -608,11 +599,6 @@ $active_page = 'mutasi_barang_rusak';
                 return false;
             });
         });
-
-        function lihatRiwayatMutasi() {
-            // Redirect ke halaman riwayat mutasi (akan dibuat nanti)
-            window.location.href = 'riwayat_mutasi_barang_rusak.php';
-        }
 
         function bukaModalMutasi(kdBarang, namaMerek, namaKategori, namaBarang, berat, stockSistem, satuan) {
             // Get data barang dan batch

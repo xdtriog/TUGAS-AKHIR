@@ -60,37 +60,48 @@ if ($result_barang->num_rows == 0) {
 
 $barang = $result_barang->fetch_assoc();
 
-// Stock awal
-$query_stock_awal = "SELECT JUMLAH_AKHIR 
-                    FROM STOCK_HISTORY 
-                    WHERE KD_BARANG = ? AND KD_LOKASI = ? 
-                    AND DATE(WAKTU_CHANGE) < ?
-                    ORDER BY WAKTU_CHANGE DESC 
-                    LIMIT 1";
-$stmt_stock_awal = $conn->prepare($query_stock_awal);
-$stmt_stock_awal->bind_param("sss", $kd_barang, $kd_lokasi, $tanggal_dari);
-$stmt_stock_awal->execute();
-$result_stock_awal = $stmt_stock_awal->get_result();
+// Stock Awal Periode = JUMLAH_AWAL dari history pertama dalam periode (data pertama dari filter Tanggal Dari)
+$tanggal_dari_datetime = $tanggal_dari . ' 00:00:00';
+$tanggal_sampai_end = date('Y-m-d', strtotime($tanggal_sampai . ' +1 day'));
+$query_first_in_period = "SELECT JUMLAH_AWAL 
+                        FROM STOCK_HISTORY 
+                        WHERE KD_BARANG = ? AND KD_LOKASI = ? 
+                        AND WAKTU_CHANGE >= ? AND WAKTU_CHANGE < ?
+                        ORDER BY WAKTU_CHANGE ASC 
+                        LIMIT 1";
+$stmt_first = $conn->prepare($query_first_in_period);
+$stmt_first->bind_param("ssss", $kd_barang, $kd_lokasi, $tanggal_dari_datetime, $tanggal_sampai_end);
+$stmt_first->execute();
+$result_first = $stmt_first->get_result();
 
 $stock_awal = 0;
-if ($result_stock_awal->num_rows > 0) {
-    $stock_awal = intval($result_stock_awal->fetch_assoc()['JUMLAH_AKHIR']);
+if ($result_first->num_rows > 0) {
+    // Ada history dalam periode, ambil JUMLAH_AWAL dari history pertama
+    $stock_awal = intval($result_first->fetch_assoc()['JUMLAH_AWAL']);
 } else {
-    $query_check_history = "SELECT COUNT(*) as TOTAL FROM STOCK_HISTORY WHERE KD_BARANG = ? AND KD_LOKASI = ?";
-    $stmt_check = $conn->prepare($query_check_history);
-    $stmt_check->bind_param("ss", $kd_barang, $kd_lokasi);
-    $stmt_check->execute();
-    $result_check = $stmt_check->get_result();
-    $total_history = intval($result_check->fetch_assoc()['TOTAL']);
+    // Tidak ada history dalam periode, ambil dari JUMLAH_AKHIR history terakhir sebelum periode
+    $query_stock_awal = "SELECT JUMLAH_AKHIR 
+                        FROM STOCK_HISTORY 
+                        WHERE KD_BARANG = ? AND KD_LOKASI = ? 
+                        AND DATE(WAKTU_CHANGE) < ?
+                        ORDER BY WAKTU_CHANGE DESC 
+                        LIMIT 1";
+    $stmt_stock_awal = $conn->prepare($query_stock_awal);
+    $stmt_stock_awal->bind_param("sss", $kd_barang, $kd_lokasi, $tanggal_dari);
+    $stmt_stock_awal->execute();
+    $result_stock_awal = $stmt_stock_awal->get_result();
     
-    if ($total_history == 0) {
-        $stock_awal = intval($barang['STOCK_SEKARANG']);
+    if ($result_stock_awal->num_rows > 0) {
+        $stock_awal = intval($result_stock_awal->fetch_assoc()['JUMLAH_AKHIR']);
     } else {
-        $stock_awal = 0;
+        // Tidak ada history sama sekali, gunakan stock saat ini
+        $stock_awal = intval($barang['STOCK_SEKARANG']);
     }
 }
 
-// History
+// Query untuk mendapatkan stock history dalam periode
+// Gunakan >= dan < untuk memastikan semua history dalam periode terambil termasuk yang di akhir hari
+$tanggal_sampai_end = date('Y-m-d', strtotime($tanggal_sampai . ' +1 day'));
 $query_history = "SELECT 
     sh.ID_HISTORY_STOCK,
     sh.WAKTU_CHANGE,
@@ -104,11 +115,12 @@ $query_history = "SELECT
 FROM STOCK_HISTORY sh
 LEFT JOIN USERS u ON sh.UPDATED_BY = u.ID_USERS
 WHERE sh.KD_BARANG = ? AND sh.KD_LOKASI = ?
-AND DATE(sh.WAKTU_CHANGE) BETWEEN ? AND ?
+AND sh.WAKTU_CHANGE >= ? AND sh.WAKTU_CHANGE < ?
 ORDER BY sh.WAKTU_CHANGE DESC, sh.ID_HISTORY_STOCK DESC";
 
 $stmt_history = $conn->prepare($query_history);
-$stmt_history->bind_param("ssss", $kd_barang, $kd_lokasi, $tanggal_dari, $tanggal_sampai);
+$tanggal_dari_datetime = $tanggal_dari . ' 00:00:00';
+$stmt_history->bind_param("ssss", $kd_barang, $kd_lokasi, $tanggal_dari_datetime, $tanggal_sampai_end);
 $stmt_history->execute();
 $result_history = $stmt_history->get_result();
 
@@ -127,9 +139,16 @@ foreach ($stock_history as $h) {
         $total_keluar += abs($h['JUMLAH_PERUBAHAN']);
     }
 }
-$stock_akhir_periode = $stock_awal;
-foreach ($stock_history as $h) {
-    $stock_akhir_periode = $h['JUMLAH_AKHIR'];
+
+// Stock akhir periode = JUMLAH_AKHIR dari data terakhir dalam periode (data dengan waktu terakhir)
+$stock_akhir_periode = 0;
+if (count($stock_history) > 0) {
+    // Query sudah di-sort DESC berdasarkan WAKTU_CHANGE, jadi data pertama adalah yang terakhir
+    // Ambil JUMLAH_AKHIR dari data dengan waktu terakhir
+    $stock_akhir_periode = intval($stock_history[0]['JUMLAH_AKHIR']);
+} else {
+    // Jika tidak ada history dalam periode, gunakan stock awal
+    $stock_akhir_periode = $stock_awal;
 }
 
 function formatTanggal($tanggal) {

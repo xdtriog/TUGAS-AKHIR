@@ -10,17 +10,28 @@ if (!isset($_SESSION['user_id']) || substr($_SESSION['user_id'], 0, 4) != 'OWNR'
 
 require_once '../includes/uuid_generator.php';
 
-// Function untuk generate kode lokasi dengan format UUID
+// Function untuk generate kode lokasi dengan format PREFIX+UUID
 function generateKodeLokasi($conn, $type_lokasi) {
-    // Generate UUID (8 karakter, tanpa prefix)
+    // Tentukan prefix berdasarkan tipe lokasi
+    $prefix = '';
+    if (strtolower($type_lokasi) == 'gudang') {
+        $prefix = 'GDNG';
+    } elseif (strtolower($type_lokasi) == 'toko') {
+        $prefix = 'TOKO';
+    } else {
+        return false; // Tipe lokasi tidak valid
+    }
+    
+    // Generate UUID (8 karakter) dan gabungkan dengan prefix
     // Pattern: generate > check > pass, generate > check (duplikat) > generate > check > pass
     $maxAttempts = 100;
     $attempt = 0;
     do {
-        $kode = ShortIdGenerator::generate(8, '');
+        $uuid = ShortIdGenerator::generate(8, '');
+        $kode = $prefix . $uuid; // Format: GDNG/TOKO + UUID (8 karakter)
         $attempt++;
         if (!checkUUIDExists($conn, 'MASTER_LOKASI', 'KD_LOKASI', $kode)) {
-            return $kode; // UUID unique, return
+            return $kode; // Kode unique, return
         }
     } while ($attempt < $maxAttempts);
     
@@ -310,7 +321,7 @@ $active_page = 'master_lokasi';
                                 <option value="gudang">Gudang</option>
                                 <option value="toko">Toko</option>
                             </select>
-                            <small class="text-muted">Kode lokasi akan dibuat otomatis dengan format UUID.</small>
+                            <small class="text-muted">Kode lokasi akan dibuat otomatis dengan format GDNG/TOKO+UUID.</small>
                         </div>
                         
                         <div class="mb-3">
