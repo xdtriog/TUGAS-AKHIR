@@ -107,11 +107,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_pesan_data'])) {
         $supplier_display = '-';
     }
     
-    // Format tanggal expired
+    // Format tanggal expired (dd/mm/yyyy untuk display)
     $tgl_expired = '';
     if (!empty($pesan_data['TGL_EXPIRED'])) {
         $date_expired = new DateTime($pesan_data['TGL_EXPIRED']);
-        $tgl_expired = $date_expired->format('Y-m-d');
+        $tgl_expired = $date_expired->format('d/m/Y');
     }
     
     echo json_encode([
@@ -635,7 +635,8 @@ $active_page = 'barang_masuk';
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label fw-bold small">Tanggal Expired <span class="text-danger">*</span></label>
-                                <input type="date" class="form-control form-control-sm" id="validasi_tgl_expired" name="tgl_expired" required>
+                                <input type="text" class="form-control form-control-sm" id="validasi_tgl_expired" name="tgl_expired" 
+                                       placeholder="dd/mm/yyyy" maxlength="10" required>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label fw-bold small">Total Masuk (dus)</label>
@@ -771,6 +772,61 @@ $active_page = 'barang_masuk';
             hitungTotalMasuk();
         });
         
+        // Format tanggal expired (dd/mm/yyyy)
+        function formatTanggalExpired(input) {
+            var value = input.value.replace(/\D/g, ''); // Hapus semua non-digit
+            var formatted = '';
+            
+            if (value.length > 0) {
+                formatted = value.substring(0, 2); // Hari
+            }
+            if (value.length > 2) {
+                formatted += '/' + value.substring(2, 4); // Bulan
+            }
+            if (value.length > 4) {
+                formatted += '/' + value.substring(4, 8); // Tahun
+            }
+            
+            input.value = formatted;
+        }
+        
+        // Event listener untuk format tanggal expired
+        $(document).on('input', '#validasi_tgl_expired', function() {
+            formatTanggalExpired(this);
+        });
+        
+        // Validasi format tanggal expired
+        function validateTanggalExpired(tanggal) {
+            var regex = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+            if (!regex.test(tanggal)) {
+                return false;
+            }
+            
+            var parts = tanggal.split('/');
+            var day = parseInt(parts[0], 10);
+            var month = parseInt(parts[1], 10);
+            var year = parseInt(parts[2], 10);
+            
+            // Validasi range
+            if (month < 1 || month > 12) return false;
+            if (day < 1 || day > 31) return false;
+            if (year < 1900 || year > 2100) return false;
+            
+            // Validasi jumlah hari per bulan
+            var daysInMonth = new Date(year, month, 0).getDate();
+            if (day > daysInMonth) return false;
+            
+            return true;
+        }
+        
+        // Konversi dd/mm/yyyy ke YYYY-MM-DD
+        function convertTanggalToYMD(tanggal) {
+            if (!tanggal) return '';
+            var parts = tanggal.split('/');
+            if (parts.length !== 3) return '';
+            return parts[2] + '-' + parts[1] + '-' + parts[0];
+        }
+        
         // Format rupiah untuk input harga dan biaya pengiriman
         function formatRupiah(angka) {
             if (!angka && angka !== 0) return '';
@@ -871,6 +927,28 @@ $active_page = 'barang_masuk';
                 return;
             }
 
+            // Validasi tanggal expired
+            var tglExpired = $('#validasi_tgl_expired').val().trim();
+            if (!tglExpired) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error Validasi!',
+                    text: 'Tanggal expired wajib diisi!',
+                    confirmButtonColor: '#e74c3c'
+                });
+                return;
+            }
+            
+            if (!validateTanggalExpired(tglExpired)) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error Validasi!',
+                    text: 'Format tanggal expired tidak valid! Gunakan format dd/mm/yyyy (contoh: 31/12/2024)',
+                    confirmButtonColor: '#e74c3c'
+                });
+                return;
+            }
+
             // Ambil harga dan biaya pengiriman (hapus format rupiah)
             var hargaPesanDus = unformatRupiah($('#validasi_harga_pesan').val()) || 0;
             var biayaPengiriman = unformatRupiah($('#validasi_biaya_pengiriman').val()) || 0;
@@ -923,6 +1001,10 @@ $active_page = 'barang_masuk';
             // Ambil harga dan biaya pengiriman (hapus format rupiah)
             var hargaPesanDus = unformatRupiah($('#validasi_harga_pesan').val()) || 0;
             var biayaPengiriman = unformatRupiah($('#validasi_biaya_pengiriman').val()) || 0;
+            
+            // Konversi tanggal expired dari dd/mm/yyyy ke YYYY-MM-DD
+            var tglExpired = $('#validasi_tgl_expired').val().trim();
+            var tglExpiredYMD = convertTanggalToYMD(tglExpired);
 
             // AJAX request untuk validasi
             $.ajax({
@@ -936,7 +1018,7 @@ $active_page = 'barang_masuk';
                     total_masuk: totalMasuk,
                     harga_pesan_dus: hargaPesanDus,
                     biaya_pengiriman: biayaPengiriman,
-                    tgl_expired: $('#validasi_tgl_expired').val()
+                    tgl_expired: tglExpiredYMD
                 },
                 dataType: 'json',
                 success: function(response) {

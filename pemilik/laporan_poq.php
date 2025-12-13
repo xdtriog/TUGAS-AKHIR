@@ -39,28 +39,11 @@ if ($lokasi['TYPE_LOKASI'] != 'gudang') {
 }
 
 // Get filter tanggal (default: bulan ini)
-// Konversi format dd/mm/yyyy ke Y-m-d jika diperlukan
-$tanggal_dari_raw = isset($_GET['tanggal_dari']) ? trim($_GET['tanggal_dari']) : date('d/m/Y', strtotime(date('Y-m-01')));
-$tanggal_sampai_raw = isset($_GET['tanggal_sampai']) ? trim($_GET['tanggal_sampai']) : date('d/m/Y', strtotime(date('Y-m-t')));
+// Input tanggal langsung dalam format YYYY-MM-DD (dari input type="date")
+$tanggal_dari = isset($_GET['tanggal_dari']) ? trim($_GET['tanggal_dari']) : date('Y-m-01');
+$tanggal_sampai = isset($_GET['tanggal_sampai']) ? trim($_GET['tanggal_sampai']) : date('Y-m-t');
 
-// Konversi dari dd/mm/yyyy ke Y-m-d
-function convertDateToYMD($dateString) {
-    if (empty($dateString)) return '';
-    // Jika sudah format Y-m-d, return as is
-    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateString)) {
-        return $dateString;
-    }
-    // Jika format dd/mm/yyyy, konversi
-    if (preg_match('/^(\d{2})\/(\d{2})\/(\d{4})$/', $dateString, $matches)) {
-        return $matches[3] . '-' . $matches[2] . '-' . $matches[1];
-    }
-    return $dateString;
-}
-
-$tanggal_dari = convertDateToYMD($tanggal_dari_raw);
-$tanggal_sampai = convertDateToYMD($tanggal_sampai_raw);
-
-// Jika konversi gagal, gunakan default
+// Validasi format tanggal
 if (empty($tanggal_dari) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $tanggal_dari)) {
     $tanggal_dari = date('Y-m-01');
 }
@@ -190,15 +173,15 @@ $active_page = 'laporan';
                     <input type="hidden" name="kd_lokasi" value="<?php echo htmlspecialchars($kd_lokasi); ?>">
                     <div class="col-md-4">
                         <label class="form-label fw-bold">Tanggal Dari</label>
-                        <input type="text" class="form-control" name="tanggal_dari" id="tanggal_dari" 
-                               value="<?php echo !empty($tanggal_dari) ? date('d/m/Y', strtotime($tanggal_dari)) : ''; ?>" 
-                               placeholder="dd/mm/yyyy" required readonly>
+                        <input type="date" class="form-control" name="tanggal_dari" id="tanggal_dari" 
+                               value="<?php echo !empty($tanggal_dari) ? htmlspecialchars($tanggal_dari) : ''; ?>" 
+                               required>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label fw-bold">Tanggal Sampai</label>
-                        <input type="text" class="form-control" name="tanggal_sampai" id="tanggal_sampai" 
-                               value="<?php echo !empty($tanggal_sampai) ? date('d/m/Y', strtotime($tanggal_sampai)) : ''; ?>" 
-                               placeholder="dd/mm/yyyy" required readonly>
+                        <input type="date" class="form-control" name="tanggal_sampai" id="tanggal_sampai" 
+                               value="<?php echo !empty($tanggal_sampai) ? htmlspecialchars($tanggal_sampai) : ''; ?>" 
+                               required>
                     </div>
                     <div class="col-md-4 d-flex align-items-end gap-2">
                         <button type="submit" class="btn btn-primary">Filter</button>
@@ -324,63 +307,11 @@ $active_page = 'laporan';
     <!-- DataTables JS -->
     <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
-    <!-- Flatpickr JS -->
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <!-- Sidebar Script -->
     <script src="includes/sidebar.js"></script>
     
     <script>
         $(document).ready(function() {
-            // Inisialisasi Flatpickr dengan format dd/mm/yyyy
-            flatpickr("#tanggal_dari", {
-                dateFormat: "d/m/Y",
-                locale: {
-                    firstDayOfWeek: 1,
-                    weekdays: {
-                        shorthand: ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"],
-                        longhand: ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
-                    },
-                    months: {
-                        shorthand: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"],
-                        longhand: ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
-                    }
-                }
-            });
-            
-            flatpickr("#tanggal_sampai", {
-                dateFormat: "d/m/Y",
-                locale: {
-                    firstDayOfWeek: 1,
-                    weekdays: {
-                        shorthand: ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"],
-                        longhand: ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
-                    },
-                    months: {
-                        shorthand: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"],
-                        longhand: ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
-                    }
-                }
-            });
-            
-            // Konversi dd/mm/yyyy ke yyyy-mm-dd saat submit
-            $('form').on('submit', function(e) {
-                const tanggalDari = $('#tanggal_dari').val();
-                const tanggalSampai = $('#tanggal_sampai').val();
-                
-                // Konversi format sebelum submit
-                if (tanggalDari) {
-                    const partsDari = tanggalDari.split('/');
-                    if (partsDari.length === 3) {
-                        $('#tanggal_dari').val(partsDari[2] + '-' + partsDari[1] + '-' + partsDari[0]);
-                    }
-                }
-                if (tanggalSampai) {
-                    const partsSampai = tanggalSampai.split('/');
-                    if (partsSampai.length === 3) {
-                        $('#tanggal_sampai').val(partsSampai[2] + '-' + partsSampai[1] + '-' + partsSampai[0]);
-                    }
-                }
-            });
             
             // Disable DataTables error reporting
             $.fn.dataTable.ext.errMode = 'none';

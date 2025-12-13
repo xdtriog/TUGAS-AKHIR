@@ -226,8 +226,6 @@ $active_page = 'laporan';
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- DataTables CSS -->
     <link href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css" rel="stylesheet">
-    <!-- Flatpickr CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <!-- Custom CSS -->
     <link href="../assets/css/style.css" rel="stylesheet">
 </head>
@@ -268,15 +266,15 @@ $active_page = 'laporan';
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-bold">Tanggal Dari</label>
-                        <input type="text" class="form-control" name="tanggal_dari" id="tanggal_dari" 
-                               value="<?php echo !empty($tanggal_dari) ? date('d/m/Y', strtotime($tanggal_dari)) : ''; ?>" 
-                               placeholder="dd/mm/yyyy" required readonly>
+                        <input type="date" class="form-control" name="tanggal_dari" id="tanggal_dari" 
+                               value="<?php echo !empty($tanggal_dari) ? htmlspecialchars($tanggal_dari) : ''; ?>" 
+                               required>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label fw-bold">Tanggal Sampai</label>
-                        <input type="text" class="form-control" name="tanggal_sampai" id="tanggal_sampai" 
-                               value="<?php echo !empty($tanggal_sampai) ? date('d/m/Y', strtotime($tanggal_sampai)) : ''; ?>" 
-                               placeholder="dd/mm/yyyy" required readonly>
+                        <input type="date" class="form-control" name="tanggal_sampai" id="tanggal_sampai" 
+                               value="<?php echo !empty($tanggal_sampai) ? htmlspecialchars($tanggal_sampai) : ''; ?>" 
+                               required>
                     </div>
                     <div class="col-md-3 d-flex align-items-end gap-2">
                         <button type="submit" class="btn btn-primary">Tampilkan</button>
@@ -458,8 +456,6 @@ $active_page = 'laporan';
     <!-- DataTables JS -->
     <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
-    <!-- Flatpickr JS -->
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <!-- Sidebar Script -->
     <script src="includes/sidebar.js"></script>
     <!-- SweetAlert2 JS -->
@@ -467,36 +463,6 @@ $active_page = 'laporan';
     
     <script>
         $(document).ready(function() {
-            // Inisialisasi Flatpickr dengan format dd/mm/yyyy
-            flatpickr("#tanggal_dari", {
-                dateFormat: "d/m/Y",
-                locale: {
-                    firstDayOfWeek: 1,
-                    weekdays: {
-                        shorthand: ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"],
-                        longhand: ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
-                    },
-                    months: {
-                        shorthand: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"],
-                        longhand: ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
-                    }
-                }
-            });
-            
-            flatpickr("#tanggal_sampai", {
-                dateFormat: "d/m/Y",
-                locale: {
-                    firstDayOfWeek: 1,
-                    weekdays: {
-                        shorthand: ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"],
-                        longhand: ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
-                    },
-                    months: {
-                        shorthand: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"],
-                        longhand: ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
-                    }
-                }
-            });
             
             // Konversi dd/mm/yyyy ke yyyy-mm-dd saat submit
             $('form').on('submit', function(e) {
