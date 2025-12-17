@@ -302,11 +302,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 }
             }
             
-            // Update STOCK di gudang (lokasi asal) - kurangi stock untuk total keseluruhan
+            // Update STOCK di gudang (lokasi asal) - kurangi stock per batch dan catat history per batch
             // Hanya update jika total kirim > 0
             if ($total_kirim_dus > 0) {
-                // Get SATUAN dari STOCK
-                $query_satuan = "SELECT SATUAN, JUMLAH_BARANG FROM STOCK WHERE KD_BARANG = ? AND KD_LOKASI = ?";
+                // Get SATUAN dan SATUAN_PERDUS dari STOCK dan MASTER_BARANG
+                $query_satuan = "SELECT s.SATUAN, s.JUMLAH_BARANG, mb.SATUAN_PERDUS 
+                                FROM STOCK s
+                                INNER JOIN MASTER_BARANG mb ON s.KD_BARANG = mb.KD_BARANG
+                                WHERE s.KD_BARANG = ? AND s.KD_LOKASI = ?";
                 $stmt_satuan = $conn->prepare($query_satuan);
                 if (!$stmt_satuan) {
                     throw new Exception('Gagal prepare query satuan: ' . $conn->error);
@@ -318,62 +321,69 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 if ($result_satuan->num_rows > 0) {
                     $stock_data = $result_satuan->fetch_assoc();
                     $satuan = $stock_data['SATUAN'];
-                    $jumlah_awal = $stock_data['JUMLAH_BARANG'];
+                    $satuan_perdus = intval($stock_data['SATUAN_PERDUS'] ?? 1);
+                    $stock_current = intval($stock_data['JUMLAH_BARANG']);
                     
-                    // Konversi jumlah kirim dari DUS ke PIECES jika perlu
-                    $jumlah_kirim_pieces = $total_kirim_dus;
-                    if ($satuan == 'PIECES') {
-                        // Get SATUAN_PERDUS dari MASTER_BARANG
-                        $query_satuan_perdus = "SELECT SATUAN_PERDUS FROM MASTER_BARANG WHERE KD_BARANG = ?";
-                        $stmt_satuan_perdus = $conn->prepare($query_satuan_perdus);
-                        $stmt_satuan_perdus->bind_param("s", $kd_barang);
-                        $stmt_satuan_perdus->execute();
-                        $result_satuan_perdus = $stmt_satuan_perdus->get_result();
-                        if ($result_satuan_perdus->num_rows > 0) {
-                            $satuan_perdus = $result_satuan_perdus->fetch_assoc()['SATUAN_PERDUS'];
-                            $jumlah_kirim_pieces = $total_kirim_dus * $satuan_perdus;
+                    // Update stock dan catat history per batch
+                    foreach ($batches as $batch) {
+                        $id_batch = $batch['id_detail_transfer_batch'] ?? '';
+                        $jumlah_kirim_batch = intval($batch['jumlah_kirim_dus'] ?? 0);
+                        
+                        if (empty($id_batch) || $jumlah_kirim_batch <= 0) {
+                            continue;
                         }
-                    }
-                    
-                    // Update STOCK di gudang (lokasi asal) - kurangi stock
-                    $jumlah_akhir = $jumlah_awal - $jumlah_kirim_pieces;
-                    if ($jumlah_akhir < 0) {
-                        throw new Exception('Stock tidak mencukupi untuk barang: ' . $kd_barang);
-                    }
-                    
-                    $update_stock = "UPDATE STOCK 
-                                   SET JUMLAH_BARANG = ?, 
-                                       LAST_UPDATED = CURRENT_TIMESTAMP,
-                                       UPDATED_BY = ?
-                                   WHERE KD_BARANG = ? AND KD_LOKASI = ?";
-                    $stmt_update_stock = $conn->prepare($update_stock);
-                    if (!$stmt_update_stock) {
-                        throw new Exception('Gagal prepare query update stock: ' . $conn->error);
-                    }
-                    $stmt_update_stock->bind_param("isss", $jumlah_akhir, $user_id, $kd_barang, $kd_lokasi);
-                    if (!$stmt_update_stock->execute()) {
-                        throw new Exception('Gagal mengupdate stock: ' . $stmt_update_stock->error);
-                    }
-                    
-                    // Insert ke STOCK_HISTORY dengan REF = ID_TRANSFER_BARANG
-                    $id_history = '';
-                    do {
-                        // Generate ID_HISTORY_STOCK dengan format SKHY+UUID (total 16 karakter: SKHY=4, UUID=12)
-                        $uuid = ShortIdGenerator::generate(12, '');
-                        $id_history = 'SKHY' . $uuid;
-                    } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
-                    
-                    $jumlah_perubahan = -$jumlah_kirim_pieces; // Negatif karena mengurangi stock
-                    $insert_history = "INSERT INTO STOCK_HISTORY 
-                                      (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
-                                      VALUES (?, ?, ?, ?, ?, ?, ?, 'TRANSFER', ?, ?)";
-                    $stmt_history = $conn->prepare($insert_history);
-                    if (!$stmt_history) {
-                        throw new Exception('Gagal prepare query insert history: ' . $conn->error);
-                    }
-                    $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal, $jumlah_perubahan, $jumlah_akhir, $id_transfer, $satuan);
-                    if (!$stmt_history->execute()) {
-                        throw new Exception('Gagal insert history: ' . $stmt_history->error);
+                        
+                        // Konversi jumlah kirim dari DUS ke PIECES jika perlu
+                        $jumlah_kirim_pieces = $jumlah_kirim_batch;
+                        if ($satuan == 'PIECES') {
+                            $jumlah_kirim_pieces = $jumlah_kirim_batch * $satuan_perdus;
+                        }
+                        
+                        // Update STOCK di gudang (lokasi asal) - kurangi stock per batch
+                        $stock_awal_batch = $stock_current;
+                        $stock_akhir_batch = $stock_current - $jumlah_kirim_pieces;
+                        
+                        if ($stock_akhir_batch < 0) {
+                            throw new Exception('Stock tidak mencukupi untuk barang: ' . $kd_barang . ' (batch: ' . $id_batch . ')');
+                        }
+                        
+                        $update_stock = "UPDATE STOCK 
+                                       SET JUMLAH_BARANG = ?, 
+                                           LAST_UPDATED = CURRENT_TIMESTAMP,
+                                           UPDATED_BY = ?
+                                       WHERE KD_BARANG = ? AND KD_LOKASI = ?";
+                        $stmt_update_stock = $conn->prepare($update_stock);
+                        if (!$stmt_update_stock) {
+                            throw new Exception('Gagal prepare query update stock: ' . $conn->error);
+                        }
+                        $stmt_update_stock->bind_param("isss", $stock_akhir_batch, $user_id, $kd_barang, $kd_lokasi);
+                        if (!$stmt_update_stock->execute()) {
+                            throw new Exception('Gagal mengupdate stock: ' . $stmt_update_stock->error);
+                        }
+                        
+                        // Insert ke STOCK_HISTORY dengan REF = ID_DETAIL_TRANSFER_BARANG_BATCH (per batch)
+                        $id_history = '';
+                        do {
+                            // Generate ID_HISTORY_STOCK dengan format SKHY+UUID (total 16 karakter: SKHY=4, UUID=12)
+                            $uuid = ShortIdGenerator::generate(12, '');
+                            $id_history = 'SKHY' . $uuid;
+                        } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
+                        
+                        $jumlah_perubahan = -$jumlah_kirim_pieces; // Negatif karena mengurangi stock
+                        $insert_history = "INSERT INTO STOCK_HISTORY 
+                                          (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
+                                          VALUES (?, ?, ?, ?, ?, ?, ?, 'TRANSFER', ?, ?)";
+                        $stmt_history = $conn->prepare($insert_history);
+                        if (!$stmt_history) {
+                            throw new Exception('Gagal prepare query insert history: ' . $conn->error);
+                        }
+                        $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $stock_awal_batch, $jumlah_perubahan, $stock_akhir_batch, $id_batch, $satuan);
+                        if (!$stmt_history->execute()) {
+                            throw new Exception('Gagal insert history: ' . $stmt_history->error);
+                        }
+                        
+                        // Update stock_current untuk batch berikutnya
+                        $stock_current = $stock_akhir_batch;
                     }
                 }
             }

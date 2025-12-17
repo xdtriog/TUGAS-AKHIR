@@ -537,69 +537,114 @@ $active_page = 'point_of_sale';
         }
         .product-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
             overflow-y: auto;
             flex: 1;
-            padding: 10px;
+            padding: 15px;
             border: 1px solid #dee2e6;
             border-radius: 8px;
+            background: #f8f9fa;
         }
         .product-card {
             border: 1px solid #dee2e6;
-            border-radius: 8px;
-            padding: 15px;
+            border-radius: 10px;
+            padding: 12px;
             cursor: pointer;
-            transition: all 0.3s;
+            transition: all 0.3s ease;
             background: white;
             display: flex;
             flex-direction: column;
-            height: auto;
-            min-height: 0;
+            height: 100%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            position: relative;
         }
-        .product-card:hover {
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            transform: translateY(-2px);
+        .product-card:hover:not(.disabled) {
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+            transform: translateY(-4px);
+            border-color: #667eea;
         }
         .product-card.disabled {
-            opacity: 0.5;
+            opacity: 0.6;
             cursor: not-allowed;
+            background: #f8f9fa;
+        }
+        .product-card.disabled::after {
+            content: 'Stok Habis';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-15deg);
+            background: rgba(220, 53, 69, 0.9);
+            color: white;
+            padding: 5px 15px;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 14px;
+            z-index: 1;
+            pointer-events: none;
         }
         .product-image {
             width: 100%;
-            height: 120px;
-            background: #f8f9fa;
-            border-radius: 4px;
+            height: 150px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: 10px;
-            font-size: 40px;
+            margin-bottom: 12px;
+            font-size: 50px;
             overflow: hidden;
             flex-shrink: 0;
+            border: 1px solid #e9ecef;
         }
         .product-image img {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
+            padding: 5px;
         }
         .product-name {
-            font-weight: bold;
-            font-size: 14px;
-            margin-bottom: 5px;
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 8px;
             word-wrap: break-word;
             word-break: break-word;
-            line-height: 1.4;
-            min-height: 2.8em;
+            line-height: 1.5;
+            min-height: 3em;
+            color: #212529;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
         .product-price {
             color: #667eea;
             font-weight: bold;
-            font-size: 16px;
+            font-size: 18px;
+            margin-bottom: 5px;
         }
         .product-stock {
-            font-size: 12px;
+            font-size: 11px;
             color: #6c757d;
+            background: #f8f9fa;
+            padding: 4px 8px;
+            border-radius: 4px;
+            display: inline-block;
+            width: fit-content;
+            font-weight: 500;
+        }
+        .product-stock.text-danger {
+            color: #dc3545;
+            background: #fff5f5;
+        }
+        .product-stock.text-warning {
+            color: #856404;
+            background: #fff3cd;
+        }
+        .product-stock.text-success {
+            color: #155724;
+            background: #d4edda;
         }
         .cart-section {
             background: white;
@@ -918,12 +963,15 @@ $active_page = 'point_of_sale';
                     imageHtml = `<img src="../${product.gambar_barang}" alt="${product.nama_barang}" onerror="this.parentElement.innerHTML='📦'">`;
                 }
                 
+                const stockClass = product.stock_sekarang === 0 ? 'text-danger' : (product.stock_sekarang < 10 ? 'text-warning' : 'text-success');
+                const stockText = product.stock_sekarang === 0 ? 'Habis' : `Stock: ${product.stock_sekarang}`;
+                
                 html += `
-                    <div class="product-card ${isDisabled ? 'disabled' : ''}" data-kd-barang="${product.kd_barang}" ${!isDisabled ? 'onclick="addToCart(\'' + product.kd_barang + '\', \'' + product.nama_barang.replace(/'/g, "\\'") + '\', ' + product.harga_jual + ', ' + product.stock_sekarang + ')"' : ''}>
+                    <div class="product-card ${isDisabled ? 'disabled' : ''}" data-kd-barang="${product.kd_barang}" ${!isDisabled ? 'onclick="addToCart(\'' + product.kd_barang + '\', \'' + escapeHtml(product.nama_barang).replace(/'/g, "\\'") + '\', ' + product.harga_jual + ', ' + product.stock_sekarang + ')"' : ''}>
                         <div class="product-image">${imageHtml}</div>
-                        <div class="product-name" title="${product.nama_barang}">${product.nama_barang}</div>
+                        <div class="product-name" title="${escapeHtml(product.nama_barang)}">${escapeHtml(product.nama_barang)}</div>
                         <div class="product-price">Rp ${formatNumber(product.harga_jual)}</div>
-                        <div class="product-stock">Stock: ${product.stock_sekarang}</div>
+                        <div class="product-stock ${stockClass}">${stockText}</div>
                     </div>
                 `;
             });

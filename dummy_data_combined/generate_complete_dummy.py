@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Script lengkap untuk generate data dummy GABUNGAN untuk 2 produk:
-- 4aCSBjQPd3TzFd90
-- W8r1LuGwd932W3Zq
+Script lengkap untuk generate data dummy GABUNGAN untuk banyak produk.
 
-PESAN_BARANG > TRANSFER (FEFO) > PENJUALAN
+PESAN_BARANG > TRANSFER (FEFO/FEFO) > PENJUALAN
 - Generate pesan barang secara berkala sampai hari ini
 - Transfer dengan logika FEFO (First Expired First Out)
 - Penjualan setiap hari
@@ -21,34 +19,114 @@ import uuid
 import time
 import os
 
+# Set seed untuk konsistensi harga jual (harus sama dengan generate_sql_insert.py)
+random.seed(42)  # Seed yang sama untuk konsistensi
+
 # ===== KONFIGURASI PRODUK =====
+# Konfigurasi dasar (akan dioverride per produk kalau perlu)
+BASE_PRODUCT_CONFIG = {
+    'HARGA_PESAN_DUS': 300000,      # Harga beli per dus (default)
+    'HARGA_JUAL_PIECE': 33000,      # Harga jual per piece (default)
+    'MIN_STOCK_TOKO': 50,           # Minimal stock toko dalam PIECES
+    'MAX_STOCK_TOKO': 200,          # Maksimal stock toko dalam PIECES
+    'MIN_STOCK_GUDANG': 30,         # Minimal stock gudang dalam DUS
+    'MAX_STOCK_GUDANG': 100,        # Maksimal stock gudang dalam DUS
+    'MIN_PESAN_DUS': 20,            # Minimal pemesanan DUS
+    'MAX_PESAN_DUS': 100,           # Maksimal pemesanan DUS
+    'MIN_TRANSFER_DUS': 2,          # Minimal transfer DUS
+}
+
+# Mapping produk ke merek (berdasarkan dbFrozenFood.sql line 401-441)
+PRODUCT_TO_MEREK = {
+    '0qiaT6r5h6tx1vG5': 'a9stS5pc',  # So Good
+    '3SMMLSAekpQ7YHBm': 'aDTThcsC',  # Belfoods
+    '4eJNEAcagseDtEgc': 'a9stS5pc',  # So Good
+    '5FkHT4Mzbx4W5kQE': 'a7bhyL91',  # Fiesta
+    '5trjzMBdbhei4ZJY': 'a7bhyL91',  # Fiesta
+    '6HYQiMz32fakk4k7': 'aDTThcsC',  # Belfoods
+    '7hvrUALJk9fW53Uw': 'aDTThcsC',  # Belfoods
+    '7KHAaDZe1ncb5PxZ': 'aDTThcsC',  # Belfoods
+    '8e0exsihhJ5vyw4R': 'a9stS5pc',  # So Good
+    'abPg4AgMfBYJQFbY': 'a9stS5pc',  # So Good
+    'BmQgQAmDbUifCNkp': 'a7bhyL91',  # Fiesta
+    'bSqgiWf3hbrwBtn8': 'aBasx0Ad',  # Champ
+    'cJR1HX6NcEBkvQa9': 'a7bhyL91',  # Fiesta
+    'd7d7HhD0d8c4B1aT': 'a7bhyL91',  # Fiesta
+    'dQVmWBpb4rAtaFyX': 'aDTThcsC',  # Belfoods
+    'EipfpEa23tx29rxA': 'aDTThcsC',  # Belfoods
+    'fEuFwvHHggEZGAuM': 'a9stS5pc',  # So Good
+    'hrzWDaube4kT8Hra': 'a7bhyL91',  # Fiesta
+    'i4nFqC8PgEZEHQYc': 'a9stS5pc',  # So Good
+    'iMq19Qq7ccrK2mMe': 'a7bhyL91',  # Fiesta
+    'jgdV5NWf41WKmiHb': 'aDTThcsC',  # Belfoods
+    'MAcpqAYAjxhGyScJ': 'aDTThcsC',  # Belfoods
+    'mh560H4Z4RpSFTnz': 'aDTThcsC',  # Belfoods
+    'MpHjcrYfdsSZCZk3': 'a7bhyL91',  # Fiesta
+    'n1F0Bxwc3arcFkcV': 'aDTThcsC',  # Belfoods
+    'NmffHrvs1NmdsNtk': 'aDTThcsC',  # Belfoods
+    'PiBLjDVZctBYPYhp': 'a7bhyL91',  # Fiesta
+    'qASpqzyP3FQ7TKJg': 'aDTThcsC',  # Belfoods
+    'sxDvWY0uiU1zu8uz': 'aBasx0Ad',  # Champ
+    't3DiGNqjiBjUns42': 'aBasx0Ad',  # Champ
+    'U3Avc19Uiip05fih': 'aBasx0Ad',  # Champ
+    'uafjPLDC2SFFw7Rk': 'aDTThcsC',  # Belfoods
+    'uTb95XLLdJdfEJ8u': 'a7bhyL91',  # Fiesta
+    'VHUkNBy8eqEXPVS1': 'a9stS5pc',  # So Good
+    'vLwTPWXVitRFFFLJ': 'aBasx0Ad',  # Champ
+    'x2RqyPEi640Bx5c0': 'aDTThcsC',  # Belfoods
+    'Xd7uGwF2hrKTbD4P': 'aBasx0Ad',  # Champ
+    'XMA9bdbvm8CXVsYU': 'aDTThcsC',  # Belfoods
+    'XzN8unV1kQRnjha4': 'aDTThcsC',  # Belfoods
+    'ZwcXmVPafgipxtmm': 'a9stS5pc',  # So Good
+}
+
+# Generate harga jual variatif untuk setiap produk (33k - 50k)
+def generate_harga_jual():
+    """Generate harga jual random antara 33,000 - 50,000"""
+    return random.randint(33000, 50000)
+
 PRODUCTS = {
-    '4aCSBjQPd3TzFd90': {
-        'KD_BARANG': '4aCSBjQPd3TzFd90',
-        'SATUAN_PERDUS': 25,  # 25 pieces per dus
-        'HARGA_PESAN_DUS': 400000,  # Harga beli per dus (lebih mahal)
-        'HARGA_JUAL_PIECE': 40000,  # Harga jual per piece (lebih mahal)
-        'MIN_STOCK_TOKO': 100,  # Minimal stock toko dalam PIECES
-        'MAX_STOCK_TOKO': 1000,  # Maksimal stock toko dalam PIECES
-        'MIN_STOCK_GUDANG': 50,  # Minimal stock gudang dalam DUS
-        'MAX_STOCK_GUDANG': 200,  # Maksimal stock gudang dalam DUS
-        'MIN_PESAN_DUS': 50,  # Minimal pemesanan DUS
-        'MAX_PESAN_DUS': 200,  # Maksimal pemesanan DUS
-        'MIN_TRANSFER_DUS': 5,  # Minimal transfer DUS
-    },
-    'W8r1LuGwd932W3Zq': {
-        'KD_BARANG': 'W8r1LuGwd932W3Zq',
-        'SATUAN_PERDUS': 10,  # 10 pieces per dus
-        'HARGA_PESAN_DUS': 300000,  # Harga beli per dus
-        'HARGA_JUAL_PIECE': 33000,  # Harga jual per piece
-        'MIN_STOCK_TOKO': 50,  # Minimal stock toko dalam PIECES (ditingkatkan dari 10)
-        'MAX_STOCK_TOKO': 200,  # Maksimal stock toko dalam PIECES (ditingkatkan dari 50)
-        'MIN_STOCK_GUDANG': 30,  # Minimal stock gudang dalam DUS (ditingkatkan dari 10)
-        'MAX_STOCK_GUDANG': 100,  # Maksimal stock gudang dalam DUS (ditingkatkan dari 30)
-        'MIN_PESAN_DUS': 20,  # Minimal pemesanan DUS (ditingkatkan dari 10)
-        'MAX_PESAN_DUS': 100,  # Maksimal pemesanan DUS (ditingkatkan dari 30)
-        'MIN_TRANSFER_DUS': 2,  # Minimal transfer DUS (ditingkatkan dari 1)
-    }
+    # Produk dari MASTER_BARANG (401-441) - dengan harga jual variatif
+    '0qiaT6r5h6tx1vG5': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': '0qiaT6r5h6tx1vG5', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    '3SMMLSAekpQ7YHBm': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': '3SMMLSAekpQ7YHBm', 'SATUAN_PERDUS': 24, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    '4eJNEAcagseDtEgc': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': '4eJNEAcagseDtEgc', 'SATUAN_PERDUS': 10, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    '5FkHT4Mzbx4W5kQE': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': '5FkHT4Mzbx4W5kQE', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    '5trjzMBdbhei4ZJY': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': '5trjzMBdbhei4ZJY', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    '6HYQiMz32fakk4k7': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': '6HYQiMz32fakk4k7', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    '7hvrUALJk9fW53Uw': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': '7hvrUALJk9fW53Uw', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    '7KHAaDZe1ncb5PxZ': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': '7KHAaDZe1ncb5PxZ', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    '8e0exsihhJ5vyw4R': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': '8e0exsihhJ5vyw4R', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'abPg4AgMfBYJQFbY': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'abPg4AgMfBYJQFbY', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'BmQgQAmDbUifCNkp': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'BmQgQAmDbUifCNkp', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'bSqgiWf3hbrwBtn8': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'bSqgiWf3hbrwBtn8', 'SATUAN_PERDUS': 10, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'cJR1HX6NcEBkvQa9': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'cJR1HX6NcEBkvQa9', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'd7d7HhD0d8c4B1aT': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'd7d7HhD0d8c4B1aT', 'SATUAN_PERDUS': 24, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'dQVmWBpb4rAtaFyX': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'dQVmWBpb4rAtaFyX', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'EipfpEa23tx29rxA': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'EipfpEa23tx29rxA', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'fEuFwvHHggEZGAuM': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'fEuFwvHHggEZGAuM', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'hrzWDaube4kT8Hra': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'hrzWDaube4kT8Hra', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'i4nFqC8PgEZEHQYc': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'i4nFqC8PgEZEHQYc', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'iMq19Qq7ccrK2mMe': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'iMq19Qq7ccrK2mMe', 'SATUAN_PERDUS': 24, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'jgdV5NWf41WKmiHb': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'jgdV5NWf41WKmiHb', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'MAcpqAYAjxhGyScJ': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'MAcpqAYAjxhGyScJ', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'mh560H4Z4RpSFTnz': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'mh560H4Z4RpSFTnz', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'MpHjcrYfdsSZCZk3': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'MpHjcrYfdsSZCZk3', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'n1F0Bxwc3arcFkcV': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'n1F0Bxwc3arcFkcV', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'NmffHrvs1NmdsNtk': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'NmffHrvs1NmdsNtk', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'PiBLjDVZctBYPYhp': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'PiBLjDVZctBYPYhp', 'SATUAN_PERDUS': 24, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'qASpqzyP3FQ7TKJg': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'qASpqzyP3FQ7TKJg', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'sxDvWY0uiU1zu8uz': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'sxDvWY0uiU1zu8uz', 'SATUAN_PERDUS': 24, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    't3DiGNqjiBjUns42': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 't3DiGNqjiBjUns42', 'SATUAN_PERDUS': 10, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'U3Avc19Uiip05fih': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'U3Avc19Uiip05fih', 'SATUAN_PERDUS': 10, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'uafjPLDC2SFFw7Rk': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'uafjPLDC2SFFw7Rk', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'uTb95XLLdJdfEJ8u': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'uTb95XLLdJdfEJ8u', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'VHUkNBy8eqEXPVS1': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'VHUkNBy8eqEXPVS1', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'vLwTPWXVitRFFFLJ': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'vLwTPWXVitRFFFLJ', 'SATUAN_PERDUS': 24, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'x2RqyPEi640Bx5c0': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'x2RqyPEi640Bx5c0', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'Xd7uGwF2hrKTbD4P': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'Xd7uGwF2hrKTbD4P', 'SATUAN_PERDUS': 24, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'XMA9bdbvm8CXVsYU': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'XMA9bdbvm8CXVsYU', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'XzN8unV1kQRnjha4': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'XzN8unV1kQRnjha4', 'SATUAN_PERDUS': 24, 'HARGA_JUAL_PIECE': generate_harga_jual()},
+    'ZwcXmVPafgipxtmm': {**BASE_PRODUCT_CONFIG, 'KD_BARANG': 'ZwcXmVPafgipxtmm', 'SATUAN_PERDUS': 12, 'HARGA_JUAL_PIECE': generate_harga_jual()},
 }
 
 # Konstanta Lokasi dan User (sama untuk semua produk)
@@ -56,9 +134,21 @@ KD_LOKASI_GUDANG = 'GDNGj825'
 KD_LOKASI_TOKO_LIST = ['TOKOeLig', 'TOKOjtqG', 'TOKOk3CZ']  # 3 toko
 USER_GUDANG = 'GDNGj825'
 USER_TOKO_LIST = ['TOKOeLig', 'TOKOrvYu', 'TOKOu8EU']  # 3 user toko
-KD_SUPPLIER_1 = 'NGP9zHgE'
-KD_SUPPLIER_2 = 'NKnVD9E9'
-BIAYA_PENGIRIMAN = 50000
+
+# Mapping Merek ke Supplier (berdasarkan dbFrozenFood.sql)
+# Merek: a7bhyL91=Fiesta, a9stS5pc=So Good, aBasx0Ad=Champ, aDTThcsC=Belfoods
+# Supplier: ZQHNayEq=PT. Fiesta Food Indonesia, ZVJwQzHe=PT. So Good Food Manufacturing,
+#           ZaC8tpzz=PT. Champ Resto Indonesia, ZdGE3cqy=PT. Belfoods Indonesia
+MEREK_TO_SUPPLIER = {
+    'a7bhyL91': 'ZQHNayEq',  # Fiesta -> PT. Fiesta Food Indonesia
+    'a9stS5pc': 'ZVJwQzHe',  # So Good -> PT. So Good Food Manufacturing
+    'aBasx0Ad': 'ZaC8tpzz',  # Champ -> PT. Champ Resto Indonesia
+    'aDTThcsC': 'ZdGE3cqy'   # Belfoods -> PT. Belfoods Indonesia
+}
+
+# BIAYA_PENGIRIMAN ditingkatkan lebih banyak untuk membuat interval POQ lebih lama (di atas 10 hari)
+# Dengan meningkatkan biaya setup, interval POQ akan lebih lama
+BIAYA_PENGIRIMAN = 1500000  # Ditingkatkan dari 50,000 menjadi 1,500,000 (30x lipat)
 
 # Periode simulasi
 START_DATE = datetime(2024, 1, 1)
@@ -193,8 +283,9 @@ def pesan_barang_baru(kd_barang, tanggal, jumlah_pesan):
     """Generate pemesanan barang baru untuk produk tertentu"""
     product = PRODUCTS[kd_barang]
     
-    # Supplier random
-    supplier = random.choice([KD_SUPPLIER_1, KD_SUPPLIER_2])
+    # Supplier berdasarkan merek produk
+    kd_merek = PRODUCT_TO_MEREK.get(kd_barang, 'a7bhyL91')  # Default Fiesta jika tidak ditemukan
+    supplier = MEREK_TO_SUPPLIER.get(kd_merek, 'ZQHNayEq')  # Default PT. Fiesta jika tidak ditemukan
     
     # Harga pesan dengan variasi ±5%
     harga_pesan_dus = random.randint(
@@ -350,9 +441,13 @@ def transfer_barang_fifo(kd_barang, tanggal, jumlah_transfer_dus, kd_lokasi_tuju
         'STATUS': 'SELESAI'
     })
     
-    # DETAIL_TRANSFER_BARANG_BATCH
+    # DETAIL_TRANSFER_BARANG_BATCH dan STOCK_HISTORY per batch
+    batch_ids = []
+    stock_gudang_current = stock_gudang_awal
+    
     for id_pesan, jumlah_dus_batch in batch_allocation:
         batch_id = generate_id_batch(tanggal)
+        batch_ids.append(batch_id)
         transfer_data.append({
             'type': 'detail_batch',
             'ID_DETAIL_TRANSFER_BARANG_BATCH': batch_id,
@@ -364,25 +459,25 @@ def transfer_barang_fifo(kd_barang, tanggal, jumlah_transfer_dus, kd_lokasi_tuju
             'JUMLAH_DITOLAK_DUS': 0,
             'JUMLAH_MASUK_DUS': jumlah_dus_batch
         })
-    
-    # Waktu transfer keluar dari gudang: sama dengan waktu selesai transfer (08:00-10:00)
-    waktu_transfer_g = waktu_selesai_transfer
-    
-    # STOCK_HISTORY - Transfer Keluar (Gudang)
-    id_history_g = generate_id_history(tanggal)
-    stock_history_data.append({
-        'ID_HISTORY_STOCK': id_history_g,
-        'KD_BARANG': kd_barang,
-        'KD_LOKASI': KD_LOKASI_GUDANG,
-        'UPDATED_BY': USER_GUDANG,
-        'JUMLAH_AWAL': stock_gudang_awal,
-        'JUMLAH_PERUBAHAN': -jumlah_transfer_actual,
-        'JUMLAH_AKHIR': stock_gudang[kd_barang],
-        'TIPE_PERUBAHAN': 'TRANSFER',
-        'REF': transfer_id,
-        'SATUAN': 'DUS',
-        'WAKTU_CHANGE': waktu_transfer_g.strftime('%Y-%m-%d %H:%M:%S')
-    })
+        
+        # STOCK_HISTORY - Transfer Keluar (Gudang) per batch
+        # Waktu transfer keluar dari gudang: sama dengan waktu selesai transfer (08:00-10:00)
+        waktu_transfer_g = waktu_selesai_transfer
+        id_history_g = generate_id_history(tanggal)
+        stock_history_data.append({
+            'ID_HISTORY_STOCK': id_history_g,
+            'KD_BARANG': kd_barang,
+            'KD_LOKASI': KD_LOKASI_GUDANG,
+            'UPDATED_BY': USER_GUDANG,
+            'JUMLAH_AWAL': stock_gudang_current,
+            'JUMLAH_PERUBAHAN': -jumlah_dus_batch,
+            'JUMLAH_AKHIR': stock_gudang_current - jumlah_dus_batch,
+            'TIPE_PERUBAHAN': 'TRANSFER',
+            'REF': batch_id,  # Gunakan ID_DETAIL_TRANSFER_BARANG_BATCH sebagai REF
+            'SATUAN': 'DUS',
+            'WAKTU_CHANGE': waktu_transfer_g.strftime('%Y-%m-%d %H:%M:%S')
+        })
+        stock_gudang_current -= jumlah_dus_batch
     
     # STOCK_HISTORY - Transfer Masuk (Toko) - terjadi setelah transfer keluar (tambah 1-5 menit)
     # Pastikan waktu transfer masuk ke toko maksimal jam 10:30 agar sebelum penjualan (yang mulai jam 11:00)
@@ -542,23 +637,29 @@ while current_date <= END_DATE:
                             jumlah_transfer_pieces = jumlah_transfer_dus * product['SATUAN_PERDUS']
                             print(f"  [{current_date.strftime('%Y-%m-%d')}] [{kd_barang}] Resupply ke {kd_lokasi_toko}: {jumlah_transfer_dus} DUS ({jumlah_transfer_pieces} PIECES), Stock toko: {stock_toko_sekarang} -> {stock_toko[kd_barang][kd_lokasi_toko]} PIECES")
         
-        # 3. PENJUALAN (setiap hari, 2-5 transaksi per toko)
+        # 3. PENJUALAN (dikurangi lebih banyak untuk membuat interval POQ lebih lama)
+        # Mengurangi tingkat permintaan (D) lebih banyak akan membuat interval POQ lebih lama
+        # Tidak setiap hari ada penjualan, dan jumlah transaksi serta pieces dikurangi lebih banyak
         for idx, kd_lokasi_toko in enumerate(KD_LOKASI_TOKO_LIST):
             user_toko = USER_TOKO_LIST[idx]
             stock_toko_sekarang = stock_toko[kd_barang][kd_lokasi_toko]
             
             if stock_toko_sekarang > 0:
-                num_transactions = random.randint(2, 5)
-                for _ in range(num_transactions):
-                    if stock_toko_sekarang <= 0:
-                        break
-                    
-                    max_jual = min(30, stock_toko_sekarang)
-                    if max_jual < 1:
-                        break
-                    jumlah_jual = random.randint(1, max_jual)
-                    penjualan(kd_barang, current_date, jumlah_jual, kd_lokasi_toko, user_toko)
-                    stock_toko_sekarang = stock_toko[kd_barang][kd_lokasi_toko]  # Update setelah penjualan
+                # Hanya 50% kemungkinan ada penjualan di hari tertentu (tidak setiap hari)
+                if random.random() < 0.5:
+                    # Maksimal 1 transaksi per hari (dikurangi dari 1-2)
+                    num_transactions = 1
+                    for _ in range(num_transactions):
+                        if stock_toko_sekarang <= 0:
+                            break
+                        
+                        # Dikurangi dari 15 menjadi 8 pieces maksimal per transaksi
+                        max_jual = min(8, stock_toko_sekarang)
+                        if max_jual < 1:
+                            break
+                        jumlah_jual = random.randint(1, max_jual)
+                        penjualan(kd_barang, current_date, jumlah_jual, kd_lokasi_toko, user_toko)
+                        stock_toko_sekarang = stock_toko[kd_barang][kd_lokasi_toko]  # Update setelah penjualan
     
     # Next day
     current_date += timedelta(days=1)

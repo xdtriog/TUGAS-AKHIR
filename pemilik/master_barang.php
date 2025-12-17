@@ -9,6 +9,127 @@ if (!isset($_SESSION['user_id']) || substr($_SESSION['user_id'], 0, 4) != 'OWNR'
     exit();
 }
 
+// Handle AJAX request untuk get detail stock per lokasi
+if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_stock_detail'])) {
+    header('Content-Type: application/json');
+    
+    $kd_barang = isset($_GET['kd_barang']) ? trim($_GET['kd_barang']) : '';
+    
+    if (empty($kd_barang)) {
+        echo json_encode(['success' => false, 'message' => 'Kode barang tidak valid!']);
+        exit();
+    }
+    
+    // Query untuk mendapatkan detail stock per lokasi
+    $query_stock_detail = "SELECT 
+        s.KD_LOKASI,
+        ml.NAMA_LOKASI,
+        ml.TYPE_LOKASI,
+        s.JUMLAH_BARANG,
+        s.SATUAN,
+        s.JUMLAH_MIN_STOCK,
+        s.JUMLAH_MAX_STOCK,
+        s.LAST_UPDATED
+    FROM STOCK s
+    INNER JOIN MASTER_LOKASI ml ON s.KD_LOKASI = ml.KD_LOKASI
+    WHERE s.KD_BARANG = ? AND ml.STATUS = 'AKTIF'
+    ORDER BY ml.TYPE_LOKASI DESC, ml.NAMA_LOKASI ASC";
+    
+    $stmt_stock_detail = $conn->prepare($query_stock_detail);
+    $stmt_stock_detail->bind_param("s", $kd_barang);
+    $stmt_stock_detail->execute();
+    $result_stock_detail = $stmt_stock_detail->get_result();
+    
+    $stock_detail = [];
+    while ($row = $result_stock_detail->fetch_assoc()) {
+        $stock_detail[] = [
+            'kd_lokasi' => $row['KD_LOKASI'],
+            'nama_lokasi' => $row['NAMA_LOKASI'],
+            'type_lokasi' => $row['TYPE_LOKASI'],
+            'jumlah_barang' => $row['JUMLAH_BARANG'],
+            'satuan' => $row['SATUAN'],
+            'min_stock' => $row['JUMLAH_MIN_STOCK'],
+            'max_stock' => $row['JUMLAH_MAX_STOCK'],
+            'last_updated' => $row['LAST_UPDATED']
+        ];
+    }
+    
+    echo json_encode([
+        'success' => true,
+        'data' => $stock_detail
+    ]);
+    exit();
+}
+
+// Handle AJAX request untuk check nama barang yang mirip
+if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['check_similar_name'])) {
+    header('Content-Type: application/json');
+    
+    $nama_barang = isset($_GET['nama_barang']) ? trim($_GET['nama_barang']) : '';
+    
+    if (empty($nama_barang) || strlen($nama_barang) < 3) {
+        echo json_encode(['success' => true, 'similar' => false, 'items' => []]);
+        exit();
+    }
+    
+    // Query untuk mencari nama barang yang mirip
+    // Gunakan LIKE dengan beberapa variasi pattern
+    $search_patterns = [
+        '%' . $nama_barang . '%',  // Contains
+        $nama_barang . '%',         // Starts with
+        '%' . $nama_barang          // Ends with
+    ];
+    
+    $similar_items = [];
+    
+    // Cari dengan LIKE
+    $query_similar = "SELECT KD_BARANG, NAMA_BARANG, STATUS 
+                      FROM MASTER_BARANG 
+                      WHERE NAMA_BARANG LIKE ? OR NAMA_BARANG LIKE ? OR NAMA_BARANG LIKE ?
+                      ORDER BY NAMA_BARANG ASC
+                      LIMIT 10";
+    $stmt_similar = $conn->prepare($query_similar);
+    if ($stmt_similar) {
+        $stmt_similar->bind_param("sss", $search_patterns[0], $search_patterns[1], $search_patterns[2]);
+        $stmt_similar->execute();
+        $result_similar = $stmt_similar->get_result();
+        
+        $nama_lower = mb_strtolower($nama_barang, 'UTF-8');
+        
+        while ($row = $result_similar->fetch_assoc()) {
+            $nama_existing = mb_strtolower($row['NAMA_BARANG'], 'UTF-8');
+            
+            // Hitung similarity menggunakan similar_text
+            similar_text($nama_lower, $nama_existing, $percent);
+            
+            // Jika similarity >= 70% atau mengandung kata yang sama
+            if ($percent >= 70 || 
+                strpos($nama_existing, $nama_lower) !== false || 
+                strpos($nama_lower, $nama_existing) !== false) {
+                $similar_items[] = [
+                    'kd_barang' => $row['KD_BARANG'],
+                    'nama_barang' => $row['NAMA_BARANG'],
+                    'status' => $row['STATUS'],
+                    'similarity' => round($percent, 2)
+                ];
+            }
+        }
+        $stmt_similar->close();
+    }
+    
+    // Sort by similarity (highest first)
+    usort($similar_items, function($a, $b) {
+        return $b['similarity'] <=> $a['similarity'];
+    });
+    
+    echo json_encode([
+        'success' => true,
+        'similar' => count($similar_items) > 0,
+        'items' => array_slice($similar_items, 0, 5) // Max 5 items
+    ]);
+    exit();
+}
+
 // Handle AJAX request untuk get data barang (untuk form edit)
 if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_barang_data'])) {
     header('Content-Type: application/json');
@@ -327,7 +448,7 @@ if (isset($_GET['success']) && $_GET['success'] == '1') {
     $message_type = 'success';
 }
 
-// Query untuk mendapatkan data Barang dengan join ke master data
+// Query untuk mendapatkan data Barang dengan join ke master data dan stock
 $query_barang = "SELECT 
                     mb.KD_BARANG,
                     mb.KD_MEREK_BARANG,
@@ -347,6 +468,24 @@ $query_barang = "SELECT
                  LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
                  ORDER BY mb.KD_BARANG ASC";
 $result_barang = $conn->query($query_barang);
+
+// Query untuk mendapatkan stock per barang dari semua lokasi
+$query_stock_all = "SELECT 
+                        KD_BARANG,
+                        SUM(CASE WHEN SATUAN = 'DUS' THEN JUMLAH_BARANG ELSE 0 END) as TOTAL_DUS,
+                        SUM(CASE WHEN SATUAN = 'PIECES' THEN JUMLAH_BARANG ELSE 0 END) as TOTAL_PIECES
+                    FROM STOCK
+                    GROUP BY KD_BARANG";
+$result_stock_all = $conn->query($query_stock_all);
+$stock_data = [];
+if ($result_stock_all && $result_stock_all->num_rows > 0) {
+    while ($row = $result_stock_all->fetch_assoc()) {
+        $stock_data[$row['KD_BARANG']] = [
+            'total_dus' => $row['TOTAL_DUS'] ?? 0,
+            'total_pieces' => $row['TOTAL_PIECES'] ?? 0
+        ];
+    }
+}
 
 // Query untuk mendapatkan data Merek (untuk dropdown)
 $query_merek = "SELECT KD_MEREK_BARANG, NAMA_MEREK 
@@ -409,6 +548,7 @@ $active_page = 'master_barang';
                             <th>Satuan Per Dus</th>
                             <th>AVG Harga Beli</th>
                             <th>Harga Jual</th>
+                            <th>Stock Sekarang</th>
                             <th>Terakhir Update</th>
                             <th>Status</th>
                             <th>Action</th>
@@ -416,7 +556,13 @@ $active_page = 'master_barang';
                     </thead>
                     <tbody>
                         <?php if ($result_barang->num_rows > 0): ?>
-                            <?php while ($row = $result_barang->fetch_assoc()): ?>
+                            <?php 
+                            // Reset pointer untuk loop ulang
+                            $result_barang->data_seek(0);
+                            while ($row = $result_barang->fetch_assoc()): 
+                                $kd_barang = $row['KD_BARANG'];
+                                $stock_info = $stock_data[$kd_barang] ?? ['total_dus' => 0, 'total_pieces' => 0];
+                            ?>
                                 <tr>
                                     <td><?php echo htmlspecialchars($row['KD_BARANG']); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_MEREK']); ?></td>
@@ -426,6 +572,17 @@ $active_page = 'master_barang';
                                     <td><?php echo number_format($row['SATUAN_PERDUS'], 0, ',', '.'); ?></td>
                                     <td>Rp <?php echo number_format($row['AVG_HARGA_BELI_PIECES'], 0, ',', '.'); ?></td>
                                     <td>Rp <?php echo number_format($row['HARGA_JUAL_BARANG_PIECES'], 0, ',', '.'); ?></td>
+                                    <td>
+                                        <div class="d-flex flex-column">
+                                            <div>
+                                                <strong>Dus:</strong> <?php echo number_format($stock_info['total_dus'], 0, ',', '.'); ?>
+                                            </div>
+                                            <div>
+                                                <strong>Pieces:</strong> <?php echo number_format($stock_info['total_pieces'], 0, ',', '.'); ?>
+                                            </div>
+                                            <button class="btn-view btn-sm mt-1" onclick="lihatDetailStock('<?php echo htmlspecialchars($kd_barang, ENT_QUOTES); ?>', '<?php echo htmlspecialchars($row['NAMA_BARANG'], ENT_QUOTES); ?>')">Detail</button>
+                                        </div>
+                                    </td>
                                     <td><?php echo date('d/m/Y H:i', strtotime($row['LAST_UPDATED'])); ?> WIB</td>
                                     <td>
                                         <span class="badge <?php echo $row['STATUS'] == 'AKTIF' ? 'bg-success' : 'bg-secondary'; ?>">
@@ -545,6 +702,49 @@ $active_page = 'master_barang';
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Detail Stock -->
+    <div class="modal fade" id="modalDetailStock" tabindex="-1" aria-labelledby="modalDetailStockLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white;">
+                    <h5 class="modal-title" id="modalDetailStockLabel">Detail Stock</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <h6 class="mb-3" id="detailStockNamaBarang"></h6>
+                    <div class="table-responsive">
+                        <table id="tableDetailStock" class="table table-custom table-striped table-hover" style="width: 100%;">
+                            <thead>
+                                <tr>
+                                    <th style="text-align: left;">Lokasi</th>
+                                    <th style="text-align: left;">Type</th>
+                                    <th style="text-align: right;">Jumlah</th>
+                                    <th style="text-align: left;">Satuan</th>
+                                    <th style="text-align: right;">Min Stock</th>
+                                    <th style="text-align: right;">Max Stock</th>
+                                    <th style="text-align: left;">Last Updated</th>
+                                </tr>
+                            </thead>
+                            <tbody id="detailStockBody">
+                                <tr>
+                                    <td colspan="7" class="text-center">
+                                        <div class="spinner-border spinner-border-sm" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                        Memuat data...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Tutup</button>
                 </div>
             </div>
         </div>
@@ -729,7 +929,7 @@ $active_page = 'master_barang';
                 autoWidth: false,
                 width: '100%',
                 columnDefs: [
-                    { orderable: false, targets: 10 } // Disable sorting on Action column
+                    { orderable: false, targets: 11 } // Disable sorting on Action column
                 ],
                 drawCallback: function(settings) {
                     if (settings.aoData.length === 0) {
@@ -801,12 +1001,111 @@ $active_page = 'master_barang';
             }
         });
         
+        // Helper function untuk escape HTML
+        function escapeHtml(text) {
+            var map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text ? text.replace(/[&<>"']/g, function(m) { return map[m]; }) : '';
+        }
+        
+        // Check nama barang yang mirip secara real-time
+        var checkNameTimeout;
+        var lastCheckedName = '';
+        var userConfirmedSimilar = false;
+        
+        $('#nama_barang').on('input', function() {
+            var namaBarang = $(this).val().trim();
+            
+            // Clear previous timeout
+            clearTimeout(checkNameTimeout);
+            
+            // Reset confirmation flag jika nama berubah
+            if (namaBarang !== lastCheckedName) {
+                userConfirmedSimilar = false;
+            }
+            
+            // Minimal 3 karakter untuk pengecekan
+            if (namaBarang.length < 3) {
+                return;
+            }
+            
+            // Debounce: tunggu 500ms setelah user berhenti mengetik
+            checkNameTimeout = setTimeout(function() {
+                // Skip jika sudah dikonfirmasi untuk nama yang sama
+                if (userConfirmedSimilar && namaBarang === lastCheckedName) {
+                    return;
+                }
+                
+                $.ajax({
+                    url: 'master_barang.php',
+                    method: 'GET',
+                    data: {
+                        check_similar_name: '1',
+                        nama_barang: namaBarang
+                    },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.success && response.similar && response.items.length > 0) {
+                            lastCheckedName = namaBarang;
+                            
+                            // Buat list nama barang yang mirip
+                            var similarList = '<ul style="text-align: left; margin: 10px 0;">';
+                            response.items.forEach(function(item) {
+                                var statusBadge = item.status === 'AKTIF' 
+                                    ? '<span class="badge bg-success">Aktif</span>' 
+                                    : '<span class="badge bg-secondary">Tidak Aktif</span>';
+                                similarList += '<li style="margin: 5px 0;">' + 
+                                    escapeHtml(item.nama_barang) + ' ' + statusBadge + 
+                                    ' <small class="text-muted">(' + item.similarity + '% mirip)</small>' +
+                                    '</li>';
+                            });
+                            similarList += '</ul>';
+                            
+                            // Tampilkan konfirmasi
+                            Swal.fire({
+                                icon: 'warning',
+                                title: 'Nama Barang Mirip Ditemukan!',
+                                html: 'Terdapat ' + response.items.length + ' barang dengan nama yang mirip:<br>' + similarList + 
+                                      '<strong>Apakah Anda yakin ingin melanjutkan?</strong>',
+                                showCancelButton: true,
+                                confirmButtonText: 'Ya, Lanjutkan',
+                                cancelButtonText: 'Batal',
+                                confirmButtonColor: '#667eea',
+                                cancelButtonColor: '#6c757d',
+                                allowOutsideClick: false,
+                                allowEscapeKey: false
+                            }).then((result) => {
+                                if (result.isConfirmed) {
+                                    userConfirmedSimilar = true;
+                                } else {
+                                    // Focus kembali ke input nama barang
+                                    $('#nama_barang').focus();
+                                }
+                            });
+                        }
+                    },
+                    error: function() {
+                        // Silent fail, tidak tampilkan error untuk pengecekan
+                    }
+                });
+            }, 2000); // Debounce 2 detik (2000ms)
+        });
+        
         // Reset flag saat modal ditutup
         $('#modalTambahBarang').on('hidden.bs.modal', function() {
             isSubmitting = false;
             $('#btnSimpanTambah').prop('disabled', false).html('Simpan');
             $('#formTambahBarang')[0].reset();
             $('#previewTambah').hide();
+            // Reset pengecekan nama
+            clearTimeout(checkNameTimeout);
+            lastCheckedName = '';
+            userConfirmedSimilar = false;
         });
         
         // Form validation dan prevent multiple submission - Edit
@@ -973,6 +1272,87 @@ $active_page = 'master_barang';
             $('#namaBarangDisplay').text(namaBarang);
             var modal = new bootstrap.Modal(document.getElementById('modalLihatGambar'));
             modal.show();
+        }
+        
+        // Function untuk melihat detail stock
+        function lihatDetailStock(kdBarang, namaBarang) {
+            $('#detailStockNamaBarang').text('Barang: ' + namaBarang);
+            $('#detailStockBody').html('<tr><td colspan="7" class="text-center"><div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Loading...</span></div> Memuat data...</td></tr>');
+            
+            var modal = new bootstrap.Modal(document.getElementById('modalDetailStock'));
+            modal.show();
+            
+            // AJAX untuk mengambil detail stock
+            $.ajax({
+                url: 'master_barang.php',
+                method: 'GET',
+                data: {
+                    get_stock_detail: '1',
+                    kd_barang: kdBarang
+                },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.success && response.data.length > 0) {
+                        var html = '';
+                        response.data.forEach(function(item) {
+                            var typeBadge = item.type_lokasi === 'gudang' 
+                                ? '<span class="badge bg-primary">Gudang</span>' 
+                                : '<span class="badge bg-success">Toko</span>';
+                            
+                            var minStock = item.min_stock !== null ? number_format(item.min_stock, 0, ',', '.') : '-';
+                            var maxStock = item.max_stock !== null ? number_format(item.max_stock, 0, ',', '.') : '-';
+                            var lastUpdated = item.last_updated 
+                                ? new Date(item.last_updated).toLocaleString('id-ID', { 
+                                    day: '2-digit', 
+                                    month: '2-digit', 
+                                    year: 'numeric', 
+                                    hour: '2-digit', 
+                                    minute: '2-digit' 
+                                }) + ' WIB'
+                                : '-';
+                            
+                            html += '<tr>';
+                            html += '<td>' + item.nama_lokasi + '</td>';
+                            html += '<td>' + typeBadge + '</td>';
+                            html += '<td style="text-align: right;"><strong>' + number_format(item.jumlah_barang, 0, ',', '.') + '</strong></td>';
+                            html += '<td>' + item.satuan + '</td>';
+                            html += '<td style="text-align: right;">' + minStock + '</td>';
+                            html += '<td style="text-align: right;">' + maxStock + '</td>';
+                            html += '<td>' + lastUpdated + '</td>';
+                            html += '</tr>';
+                        });
+                        $('#detailStockBody').html(html);
+                    } else {
+                        $('#detailStockBody').html('<tr><td colspan="7" class="text-center text-muted">Tidak ada data stock</td></tr>');
+                    }
+                },
+                error: function() {
+                    $('#detailStockBody').html('<tr><td colspan="7" class="text-center text-danger">Gagal memuat data stock</td></tr>');
+                }
+            });
+        }
+        
+        // Helper function untuk format number
+        function number_format(number, decimals, dec_point, thousands_sep) {
+            number = (number + '').replace(/[^0-9+\-Ee.]/g, '');
+            var n = !isFinite(+number) ? 0 : +number;
+            var prec = !isFinite(+decimals) ? 0 : Math.abs(decimals);
+            var sep = (typeof thousands_sep === 'undefined') ? ',' : thousands_sep;
+            var dec = (typeof dec_point === 'undefined') ? '.' : dec_point;
+            var s = '';
+            var toFixedFix = function (n, prec) {
+                var k = Math.pow(10, prec);
+                return '' + Math.round(n * k) / k;
+            };
+            s = (prec ? toFixedFix(n, prec) : '' + Math.round(n)).split('.');
+            if (s[0].length > 3) {
+                s[0] = s[0].replace(/\B(?=(?:\d{3})+(?!\d))/g, sep);
+            }
+            if ((s[1] || '').length < prec) {
+                s[1] = s[1] || '';
+                s[1] += new Array(prec - s[1].length + 1).join('0');
+            }
+            return s.join(dec);
         }
         
         // Function untuk membuka modal edit barang
