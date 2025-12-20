@@ -302,33 +302,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             $total_ditolak_dus = 0;
             $total_masuk_dus = 0;
             
-            // Simpan jumlah kirim lama untuk setiap batch sebelum update (untuk STOCK_HISTORY)
+            // Simpan jumlah kirim dan masuk lama untuk setiap batch sebelum update (untuk STOCK_HISTORY)
             $batch_kirim_lama_map = [];
-            if ($status_koreksi == 'DIKIRIM') {
-                foreach ($batches as $batch) {
-                    $id_batch = $batch['id_detail_transfer_batch'] ?? '';
-                    if (empty($id_batch)) {
-                        continue;
-                    }
-                    
-                    // Get JUMLAH_KIRIM_DUS lama dari batch sebelum update
-                    $query_batch_lama = "SELECT JUMLAH_KIRIM_DUS FROM DETAIL_TRANSFER_BARANG_BATCH WHERE ID_DETAIL_TRANSFER_BARANG_BATCH = ?";
-                    $stmt_batch_lama = $conn->prepare($query_batch_lama);
-                    if (!$stmt_batch_lama) {
-                        throw new Exception('Gagal prepare query batch lama: ' . $conn->error);
-                    }
-                    $stmt_batch_lama->bind_param("s", $id_batch);
-                    $stmt_batch_lama->execute();
-                    $result_batch_lama = $stmt_batch_lama->get_result();
-                    $jumlah_kirim_lama = 0;
-                    if ($result_batch_lama->num_rows > 0) {
-                        $batch_lama_data = $result_batch_lama->fetch_assoc();
-                        $jumlah_kirim_lama = intval($batch_lama_data['JUMLAH_KIRIM_DUS'] ?? 0);
-                    }
-                    $stmt_batch_lama->close();
-                    
-                    $batch_kirim_lama_map[$id_batch] = $jumlah_kirim_lama;
+            $batch_masuk_lama_map = [];
+            foreach ($batches as $batch) {
+                $id_batch = $batch['id_detail_transfer_batch'] ?? '';
+                if (empty($id_batch)) {
+                    continue;
                 }
+                
+                // Get nilai lama dari batch sebelum update
+                $query_batch_lama = "SELECT JUMLAH_KIRIM_DUS, JUMLAH_MASUK_DUS FROM DETAIL_TRANSFER_BARANG_BATCH WHERE ID_DETAIL_TRANSFER_BARANG_BATCH = ?";
+                $stmt_batch_lama = $conn->prepare($query_batch_lama);
+                if (!$stmt_batch_lama) {
+                    throw new Exception('Gagal prepare query batch lama: ' . $conn->error);
+                }
+                $stmt_batch_lama->bind_param("s", $id_batch);
+                $stmt_batch_lama->execute();
+                $result_batch_lama = $stmt_batch_lama->get_result();
+                $jumlah_kirim_lama = 0;
+                $jumlah_masuk_lama = 0;
+                if ($result_batch_lama->num_rows > 0) {
+                    $batch_lama_data = $result_batch_lama->fetch_assoc();
+                    $jumlah_kirim_lama = intval($batch_lama_data['JUMLAH_KIRIM_DUS'] ?? 0);
+                    $jumlah_masuk_lama = intval($batch_lama_data['JUMLAH_MASUK_DUS'] ?? 0);
+                }
+                $stmt_batch_lama->close();
+                
+                $batch_kirim_lama_map[$id_batch] = $jumlah_kirim_lama;
+                $batch_masuk_lama_map[$id_batch] = $jumlah_masuk_lama;
             }
             
             // Update setiap batch
@@ -423,9 +425,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                     
                     $total_kirim_dus += $jumlah_kirim_batch;
                 } else {
-                    // Untuk status SELESAI, update tiba, ditolak, masuk
+                    // Untuk status SELESAI, update kirim, tiba, ditolak, masuk
+                    $jumlah_kirim_batch = intval($batch['jumlah_kirim_dus'] ?? 0);
                     $jumlah_tiba_batch = intval($batch['jumlah_diterima_dus'] ?? 0);
                     $jumlah_ditolak_batch = intval($batch['jumlah_ditolak_dus'] ?? 0);
+                    
+                    // Validasi: jumlah tiba tidak boleh melebihi jumlah kirim
+                    if ($jumlah_tiba_batch > $jumlah_kirim_batch) {
+                        $jumlah_tiba_batch = $jumlah_kirim_batch;
+                    }
                     
                     // Validasi: jumlah ditolak tidak boleh melebihi jumlah tiba
                     if ($jumlah_ditolak_batch > $jumlah_tiba_batch) {
@@ -438,7 +446,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                     }
                     
                     $update_batch = "UPDATE DETAIL_TRANSFER_BARANG_BATCH 
-                                    SET JUMLAH_TIBA_DUS = ?,
+                                    SET JUMLAH_KIRIM_DUS = ?,
+                                        JUMLAH_TIBA_DUS = ?,
                                         JUMLAH_DITOLAK_DUS = ?,
                                         JUMLAH_MASUK_DUS = ?
                                     WHERE ID_DETAIL_TRANSFER_BARANG_BATCH = ? AND ID_DETAIL_TRANSFER_BARANG = ?";
@@ -446,10 +455,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                     if (!$stmt_batch) {
                         throw new Exception('Gagal prepare query update batch: ' . $conn->error);
                     }
-                    $stmt_batch->bind_param("iiiss", $jumlah_tiba_batch, $jumlah_ditolak_batch, $jumlah_masuk_batch, $id_batch, $id_detail);
+                    $stmt_batch->bind_param("iiiiss", $jumlah_kirim_batch, $jumlah_tiba_batch, $jumlah_ditolak_batch, $jumlah_masuk_batch, $id_batch, $id_detail);
                     if (!$stmt_batch->execute()) {
                         throw new Exception('Gagal update batch: ' . $stmt_batch->error);
                     }
+                    $total_kirim_dus += $jumlah_kirim_batch;
                     $total_tiba_dus += $jumlah_tiba_batch;
                     $total_ditolak_dus += $jumlah_ditolak_batch;
                     $total_masuk_dus += $jumlah_masuk_batch;
@@ -600,9 +610,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                     $stmt_barang->close();
                 }
             } else {
-                // Untuk status SELESAI, update tiba, ditolak, masuk
+                // Untuk status SELESAI, update kirim, tiba, ditolak, masuk
                 $update_detail = "UPDATE DETAIL_TRANSFER_BARANG 
-                                 SET TOTAL_TIBA_DUS = ?,
+                                 SET TOTAL_KIRIM_DUS = ?,
+                                     TOTAL_TIBA_DUS = ?,
                                      TOTAL_DITOLAK_DUS = ?,
                                      TOTAL_MASUK_DUS = ?
                                  WHERE ID_DETAIL_TRANSFER_BARANG = ? AND ID_TRANSFER_BARANG = ?";
@@ -610,7 +621,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 if (!$stmt_detail) {
                     throw new Exception('Gagal prepare query detail: ' . $conn->error);
                 }
-                $stmt_detail->bind_param("iiiss", $total_tiba_dus, $total_ditolak_dus, $total_masuk_dus, $id_detail, $id_transfer);
+                $stmt_detail->bind_param("iiiiss", $total_kirim_dus, $total_tiba_dus, $total_ditolak_dus, $total_masuk_dus, $id_detail, $id_transfer);
                 if (!$stmt_detail->execute()) {
                     throw new Exception('Gagal update detail transfer: ' . $stmt_detail->error);
                 }
@@ -618,79 +629,282 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
             
             // Hanya update STOCK dan STOCK_HISTORY jika status SELESAI
             if ($status_koreksi == 'SELESAI') {
-                // Get SATUAN, SATUAN_PERDUS
-            $query_barang = "SELECT mb.SATUAN_PERDUS, COALESCE(s.SATUAN, 'DUS') as SATUAN, COALESCE(s.JUMLAH_BARANG, 0) as JUMLAH_BARANG
+                // Get SATUAN, SATUAN_PERDUS untuk gudang (lokasi asal)
+                $query_barang_gudang = "SELECT mb.SATUAN_PERDUS, COALESCE(s.JUMLAH_BARANG, 0) as JUMLAH_BARANG, COALESCE(s.SATUAN, 'DUS') as SATUAN
                             FROM MASTER_BARANG mb
                             LEFT JOIN STOCK s ON mb.KD_BARANG = s.KD_BARANG AND s.KD_LOKASI = ?
                             WHERE mb.KD_BARANG = ?";
-            $stmt_barang = $conn->prepare($query_barang);
-            if (!$stmt_barang) {
-                throw new Exception('Gagal prepare query barang: ' . $conn->error);
-            }
-            $stmt_barang->bind_param("ss", $kd_lokasi_asal, $kd_barang);
-            $stmt_barang->execute();
-            $result_barang = $stmt_barang->get_result();
-            
-            if ($result_barang->num_rows == 0) {
-                continue;
-            }
-            
-            $barang_data = $result_barang->fetch_assoc();
-            $satuan = $barang_data['SATUAN'];
-            $satuan_perdus = intval($barang_data['SATUAN_PERDUS'] ?? 1);
-            $jumlah_awal = intval($barang_data['JUMLAH_BARANG'] ?? 0);
-            
-            // Hitung selisih total masuk (baru - lama)
-            $selisih_masuk_dus = $total_masuk_dus - $old_total_masuk_dus;
-            $selisih_masuk_pieces = $selisih_masuk_dus * $satuan_perdus;
-            
-            // Update STOCK di gudang (lokasi asal) - kurangi stock karena barang kembali
-            $jumlah_akhir = $jumlah_awal - $selisih_masuk_pieces; // Negatif karena mengurangi stock gudang
-            
-            if ($jumlah_awal > 0 || $result_barang->num_rows > 0) {
-                $update_stock = "UPDATE STOCK 
-                               SET JUMLAH_BARANG = ?, 
-                                   LAST_UPDATED = CURRENT_TIMESTAMP,
-                                   UPDATED_BY = ?
-                               WHERE KD_BARANG = ? AND KD_LOKASI = ?";
-                $stmt_update_stock = $conn->prepare($update_stock);
-                if (!$stmt_update_stock) {
-                    throw new Exception('Gagal prepare query update stock: ' . $conn->error);
+                $stmt_barang_gudang = $conn->prepare($query_barang_gudang);
+                if (!$stmt_barang_gudang) {
+                    throw new Exception('Gagal prepare query barang gudang: ' . $conn->error);
                 }
-                $stmt_update_stock->bind_param("isss", $jumlah_akhir, $user_id, $kd_barang, $kd_lokasi_asal);
-            } else {
-                $update_stock = "INSERT INTO STOCK (KD_BARANG, KD_LOKASI, JUMLAH_BARANG, UPDATED_BY, SATUAN, LAST_UPDATED)
-                               VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
-                $stmt_update_stock = $conn->prepare($update_stock);
-                if (!$stmt_update_stock) {
-                    throw new Exception('Gagal prepare query insert stock: ' . $conn->error);
+                $stmt_barang_gudang->bind_param("ss", $kd_lokasi_asal, $kd_barang);
+                $stmt_barang_gudang->execute();
+                $result_barang_gudang = $stmt_barang_gudang->get_result();
+                
+                if ($result_barang_gudang->num_rows == 0) {
+                    $stmt_barang_gudang->close();
+                    continue;
                 }
-                $stmt_update_stock->bind_param("ssiss", $kd_barang, $kd_lokasi_asal, $jumlah_akhir, $user_id, $satuan);
-            }
-            
-            if (!$stmt_update_stock->execute()) {
-                throw new Exception('Gagal mengupdate stock: ' . $stmt_update_stock->error);
-            }
-            
-            // Insert ke STOCK_HISTORY untuk gudang (lokasi asal)
-            $id_history = '';
-            do {
-                $uuid = ShortIdGenerator::generate(12, '');
-                $id_history = 'SKHY' . $uuid;
-            } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history));
-            
-            $jumlah_perubahan = -$selisih_masuk_pieces; // Negatif karena mengurangi stock gudang
-            $insert_history = "INSERT INTO STOCK_HISTORY 
-                              (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, 'KOREKSI', ?, ?)";
-            $stmt_history = $conn->prepare($insert_history);
-            if (!$stmt_history) {
-                throw new Exception('Gagal prepare query insert history: ' . $conn->error);
-            }
-            $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi_asal, $user_id, $jumlah_awal, $jumlah_perubahan, $jumlah_akhir, $id_detail, $satuan);
-            if (!$stmt_history->execute()) {
-                throw new Exception('Gagal insert history: ' . $stmt_history->error);
-            }
+                
+                $barang_data_gudang = $result_barang_gudang->fetch_assoc();
+                $satuan_gudang = $barang_data_gudang['SATUAN'];
+                $satuan_perdus = intval($barang_data_gudang['SATUAN_PERDUS'] ?? 1);
+                $stock_awal_gudang = intval($barang_data_gudang['JUMLAH_BARANG'] ?? 0);
+                
+                // Catat ke STOCK_HISTORY untuk gudang per batch secara berurutan
+                // Setiap batch dicatat dengan stock awal dari batch sebelumnya
+                // Untuk gudang, perubahan berdasarkan selisih kirim (bukan selisih masuk)
+                $stock_current_gudang = $stock_awal_gudang;
+                
+                foreach ($batches as $batch) {
+                    $id_batch_history = $batch['id_detail_transfer_batch'] ?? '';
+                    if (empty($id_batch_history)) {
+                        continue;
+                    }
+                    
+                    // Get jumlah kirim baru dan lama untuk batch ini
+                    $jumlah_kirim_batch_baru = intval($batch['jumlah_kirim_dus'] ?? 0);
+                    $jumlah_kirim_batch_lama = $batch_kirim_lama_map[$id_batch_history] ?? 0;
+                    
+                    // Hitung selisih jumlah kirim untuk batch ini (dalam DUS)
+                    $selisih_kirim_batch = $jumlah_kirim_batch_baru - $jumlah_kirim_batch_lama;
+                    
+                    // Hanya catat ke STOCK_HISTORY gudang jika ada perubahan jumlah kirim
+                    if ($selisih_kirim_batch != 0) {
+                        // Konversi selisih ke satuan stock yang sesuai
+                        $selisih_kirim_batch_stock = $selisih_kirim_batch;
+                        if ($satuan_gudang == 'PIECES') {
+                            $selisih_kirim_batch_stock = $selisih_kirim_batch * $satuan_perdus;
+                        }
+                        
+                        // Untuk STOCK_HISTORY gudang per batch:
+                        // JUMLAH_AWAL = stock gudang saat ini (dari batch sebelumnya atau stock awal)
+                        // JUMLAH_PERUBAHAN = selisih kirim batch ini (negatif karena mengurangi stock saat kirim bertambah)
+                        // JUMLAH_AKHIR = JUMLAH_AWAL + JUMLAH_PERUBAHAN
+                        // REF = ID_DETAIL_TRANSFER_BARANG_BATCH (berbeda per batch)
+                        
+                        $jumlah_awal_batch_gudang = $stock_current_gudang;
+                        $jumlah_perubahan_batch_gudang = -$selisih_kirim_batch_stock; // Negatif karena mengurangi stock saat kirim bertambah
+                        $jumlah_akhir_batch_gudang = $jumlah_awal_batch_gudang + $jumlah_perubahan_batch_gudang;
+                        
+                        $id_history_batch_gudang = '';
+                        do {
+                            $uuid = ShortIdGenerator::generate(12, '');
+                            $id_history_batch_gudang = 'SKHY' . $uuid;
+                        } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history_batch_gudang));
+                        
+                        $insert_history_batch_gudang = "INSERT INTO STOCK_HISTORY 
+                                                   (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
+                                                   VALUES (?, ?, ?, ?, ?, ?, ?, 'KOREKSI', ?, ?)";
+                        $stmt_history_batch_gudang = $conn->prepare($insert_history_batch_gudang);
+                        if (!$stmt_history_batch_gudang) {
+                            throw new Exception('Gagal prepare query insert history batch gudang: ' . $conn->error);
+                        }
+                        $stmt_history_batch_gudang->bind_param("ssssiiiss", $id_history_batch_gudang, $kd_barang, $kd_lokasi_asal, $user_id, $jumlah_awal_batch_gudang, $jumlah_perubahan_batch_gudang, $jumlah_akhir_batch_gudang, $id_batch_history, $satuan_gudang);
+                        if (!$stmt_history_batch_gudang->execute()) {
+                            throw new Exception('Gagal insert history batch gudang: ' . $stmt_history_batch_gudang->error);
+                        }
+                        $stmt_history_batch_gudang->close();
+                        
+                        // Update stock_current_gudang untuk batch berikutnya
+                        $stock_current_gudang = $jumlah_akhir_batch_gudang;
+                    }
+                }
+                
+                // Finally, update the main STOCK table gudang dengan final calculated stock
+                if ($stock_awal_gudang > 0 || $result_barang_gudang->num_rows > 0) {
+                    $update_stock_gudang = "UPDATE STOCK 
+                                       SET JUMLAH_BARANG = ?, 
+                                           LAST_UPDATED = CURRENT_TIMESTAMP,
+                                           UPDATED_BY = ?
+                                       WHERE KD_BARANG = ? AND KD_LOKASI = ?";
+                    $stmt_update_stock_gudang = $conn->prepare($update_stock_gudang);
+                    if (!$stmt_update_stock_gudang) {
+                        throw new Exception('Gagal prepare query update stock gudang: ' . $conn->error);
+                    }
+                    $stmt_update_stock_gudang->bind_param("isss", $stock_current_gudang, $user_id, $kd_barang, $kd_lokasi_asal);
+                } else {
+                    $update_stock_gudang = "INSERT INTO STOCK (KD_BARANG, KD_LOKASI, JUMLAH_BARANG, UPDATED_BY, SATUAN, LAST_UPDATED)
+                                       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+                    $stmt_update_stock_gudang = $conn->prepare($update_stock_gudang);
+                    if (!$stmt_update_stock_gudang) {
+                        throw new Exception('Gagal prepare query insert stock gudang: ' . $conn->error);
+                    }
+                    $stmt_update_stock_gudang->bind_param("ssiss", $kd_barang, $kd_lokasi_asal, $stock_current_gudang, $user_id, $satuan_gudang);
+                }
+                
+                if (!$stmt_update_stock_gudang->execute()) {
+                    throw new Exception('Gagal mengupdate stock gudang: ' . $stmt_update_stock_gudang->error);
+                }
+                $stmt_update_stock_gudang->close();
+                $stmt_barang_gudang->close();
+                
+                // Update STOCK dan STOCK_HISTORY untuk toko (lokasi tujuan) berdasarkan selisih masuk
+                // Get SATUAN, SATUAN_PERDUS untuk toko (lokasi tujuan)
+                $query_barang_toko = "SELECT mb.SATUAN_PERDUS, COALESCE(s.JUMLAH_BARANG, 0) as JUMLAH_BARANG, COALESCE(s.SATUAN, 'PIECES') as SATUAN
+                            FROM MASTER_BARANG mb
+                            LEFT JOIN STOCK s ON mb.KD_BARANG = s.KD_BARANG AND s.KD_LOKASI = ?
+                            WHERE mb.KD_BARANG = ?";
+                $stmt_barang_toko = $conn->prepare($query_barang_toko);
+                if (!$stmt_barang_toko) {
+                    throw new Exception('Gagal prepare query barang toko: ' . $conn->error);
+                }
+                $stmt_barang_toko->bind_param("ss", $kd_lokasi_tujuan, $kd_barang);
+                $stmt_barang_toko->execute();
+                $result_barang_toko = $stmt_barang_toko->get_result();
+                
+                if ($result_barang_toko->num_rows > 0) {
+                    $barang_data_toko = $result_barang_toko->fetch_assoc();
+                    $satuan_toko = $barang_data_toko['SATUAN'];
+                    $satuan_perdus_toko = intval($barang_data_toko['SATUAN_PERDUS'] ?? 1);
+                    $stock_awal_toko = intval($barang_data_toko['JUMLAH_BARANG'] ?? 0);
+                    
+                    // Catat ke STOCK_HISTORY untuk toko per batch secara berurutan
+                    // Setiap batch dicatat dengan stock awal dari batch sebelumnya
+                    // Untuk toko, perubahan berdasarkan selisih masuk (bukan selisih kirim)
+                    $stock_current_toko = $stock_awal_toko;
+                    
+                    foreach ($batches as $batch) {
+                        $id_batch_history = $batch['id_detail_transfer_batch'] ?? '';
+                        if (empty($id_batch_history)) {
+                            continue;
+                        }
+                        
+                        // Get jumlah masuk baru dan lama untuk batch ini
+                        $jumlah_masuk_batch_baru = intval($batch['jumlah_diterima_dus'] ?? 0) - intval($batch['jumlah_ditolak_dus'] ?? 0);
+                        if ($jumlah_masuk_batch_baru < 0) {
+                            $jumlah_masuk_batch_baru = 0;
+                        }
+                        $jumlah_masuk_batch_lama = $batch_masuk_lama_map[$id_batch_history] ?? 0;
+                        
+                        // Hitung selisih jumlah masuk untuk batch ini (dalam DUS)
+                        $selisih_masuk_batch = $jumlah_masuk_batch_baru - $jumlah_masuk_batch_lama;
+                        
+                        // Konversi selisih ke satuan stock yang sesuai
+                        $selisih_masuk_batch_stock = $selisih_masuk_batch;
+                        if ($satuan_toko == 'PIECES') {
+                            $selisih_masuk_batch_stock = $selisih_masuk_batch * $satuan_perdus_toko;
+                        }
+                        
+                        // Untuk STOCK_HISTORY toko per batch:
+                        // JUMLAH_AWAL = stock toko saat ini (dari batch sebelumnya atau stock awal)
+                        // JUMLAH_PERUBAHAN = selisih masuk batch ini (positif karena menambah stock)
+                        // JUMLAH_AKHIR = JUMLAH_AWAL + JUMLAH_PERUBAHAN
+                        // REF = ID_DETAIL_TRANSFER_BARANG_BATCH (berbeda per batch)
+                        
+                        $jumlah_awal_batch_toko = $stock_current_toko;
+                        $jumlah_perubahan_batch_toko = $selisih_masuk_batch_stock; // Positif karena menambah stock
+                        $jumlah_akhir_batch_toko = $jumlah_awal_batch_toko + $jumlah_perubahan_batch_toko;
+                        
+                        $id_history_batch_toko = '';
+                        do {
+                            $uuid = ShortIdGenerator::generate(12, '');
+                            $id_history_batch_toko = 'SKHY' . $uuid;
+                        } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history_batch_toko));
+                        
+                        $insert_history_batch_toko = "INSERT INTO STOCK_HISTORY 
+                                                   (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
+                                                   VALUES (?, ?, ?, ?, ?, ?, ?, 'KOREKSI', ?, ?)";
+                        $stmt_history_batch_toko = $conn->prepare($insert_history_batch_toko);
+                        if (!$stmt_history_batch_toko) {
+                            throw new Exception('Gagal prepare query insert history batch toko: ' . $conn->error);
+                        }
+                        $stmt_history_batch_toko->bind_param("ssssiiiss", $id_history_batch_toko, $kd_barang, $kd_lokasi_tujuan, $user_id, $jumlah_awal_batch_toko, $jumlah_perubahan_batch_toko, $jumlah_akhir_batch_toko, $id_batch_history, $satuan_toko);
+                        if (!$stmt_history_batch_toko->execute()) {
+                            throw new Exception('Gagal insert history batch toko: ' . $stmt_history_batch_toko->error);
+                        }
+                        $stmt_history_batch_toko->close();
+                        
+                        // Update stock_current_toko untuk batch berikutnya
+                        $stock_current_toko = $jumlah_akhir_batch_toko;
+                        
+                        // Hitung selisih lama dan baru untuk kompensasi MUTASI_BARANG_RUSAK
+                        $jumlah_kirim_batch_baru = intval($batch['jumlah_kirim_dus'] ?? 0);
+                        $jumlah_kirim_batch_lama = $batch_kirim_lama_map[$id_batch_history] ?? 0;
+                        
+                        // Selisih lama = masuk_lama - kirim_lama
+                        $selisih_lama_dus = $jumlah_masuk_batch_lama - $jumlah_kirim_batch_lama;
+                        // Selisih baru = masuk_baru - kirim_baru
+                        $selisih_baru_dus = $jumlah_masuk_batch_baru - $jumlah_kirim_batch_baru;
+                        // Perubahan selisih = selisih_baru - selisih_lama
+                        $perubahan_selisih_dus = $selisih_baru_dus - $selisih_lama_dus;
+                        
+                        // Jika ada perubahan selisih, buat kompensasi di MUTASI_BARANG_RUSAK
+                        if ($perubahan_selisih_dus != 0) {
+                            // Konversi ke pieces
+                            $perubahan_selisih_pieces = $perubahan_selisih_dus * $satuan_perdus_toko;
+                            
+                            // Get AVG_HARGA_BELI_PIECES untuk menghitung total uang
+                            $query_harga = "SELECT AVG_HARGA_BELI_PIECES FROM MASTER_BARANG WHERE KD_BARANG = ?";
+                            $stmt_harga = $conn->prepare($query_harga);
+                            if (!$stmt_harga) {
+                                throw new Exception('Gagal prepare query harga: ' . $conn->error);
+                            }
+                            $stmt_harga->bind_param("s", $kd_barang);
+                            $stmt_harga->execute();
+                            $result_harga = $stmt_harga->get_result();
+                            $harga_barang_pieces = 0;
+                            if ($result_harga->num_rows > 0) {
+                                $harga_data = $result_harga->fetch_assoc();
+                                $harga_barang_pieces = floatval($harga_data['AVG_HARGA_BELI_PIECES'] ?? 0);
+                            }
+                            $stmt_harga->close();
+                            
+                            // TOTAL_UANG = perubahan_selisih_pieces * harga_barang_pieces
+                            $total_uang = $perubahan_selisih_pieces * $harga_barang_pieces;
+                            
+                            // Generate ID_MUTASI_BARANG_RUSAK dengan format MTRK+UUID
+                            $id_mutasi_rusak = '';
+                            do {
+                                $uuid = ShortIdGenerator::generate(12, '');
+                                $id_mutasi_rusak = 'MTRK' . $uuid;
+                            } while (checkUUIDExists($conn, 'MUTASI_BARANG_RUSAK', 'ID_MUTASI_BARANG_RUSAK', $id_mutasi_rusak));
+                            
+                            // Insert kompensasi ke MUTASI_BARANG_RUSAK
+                            $insert_mutasi_rusak = "INSERT INTO MUTASI_BARANG_RUSAK 
+                                                  (ID_MUTASI_BARANG_RUSAK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_MUTASI_DUS, SATUAN_PERDUS, TOTAL_BARANG_PIECES, HARGA_BARANG_PIECES, TOTAL_UANG, REF)
+                                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                            $stmt_mutasi_rusak = $conn->prepare($insert_mutasi_rusak);
+                            if (!$stmt_mutasi_rusak) {
+                                throw new Exception('Gagal prepare query mutasi rusak: ' . $conn->error);
+                            }
+                            $stmt_mutasi_rusak->bind_param("ssssiiidds", $id_mutasi_rusak, $kd_barang, $kd_lokasi_tujuan, $user_id, $perubahan_selisih_dus, $satuan_perdus_toko, $perubahan_selisih_pieces, $harga_barang_pieces, $total_uang, $id_batch_history);
+                            if (!$stmt_mutasi_rusak->execute()) {
+                                throw new Exception('Gagal insert mutasi rusak: ' . $stmt_mutasi_rusak->error);
+                            }
+                            $stmt_mutasi_rusak->close();
+                        }
+                    }
+                    
+                    // Finally, update the main STOCK table toko dengan final calculated stock
+                    if ($stock_awal_toko > 0 || $result_barang_toko->num_rows > 0) {
+                        $update_stock_toko = "UPDATE STOCK 
+                                           SET JUMLAH_BARANG = ?, 
+                                               LAST_UPDATED = CURRENT_TIMESTAMP,
+                                               UPDATED_BY = ?
+                                           WHERE KD_BARANG = ? AND KD_LOKASI = ?";
+                        $stmt_update_stock_toko = $conn->prepare($update_stock_toko);
+                        if (!$stmt_update_stock_toko) {
+                            throw new Exception('Gagal prepare query update stock toko: ' . $conn->error);
+                        }
+                        $stmt_update_stock_toko->bind_param("isss", $stock_current_toko, $user_id, $kd_barang, $kd_lokasi_tujuan);
+                    } else {
+                        $update_stock_toko = "INSERT INTO STOCK (KD_BARANG, KD_LOKASI, JUMLAH_BARANG, UPDATED_BY, SATUAN, LAST_UPDATED)
+                                           VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+                        $stmt_update_stock_toko = $conn->prepare($update_stock_toko);
+                        if (!$stmt_update_stock_toko) {
+                            throw new Exception('Gagal prepare query insert stock toko: ' . $conn->error);
+                        }
+                        $stmt_update_stock_toko->bind_param("ssiss", $kd_barang, $kd_lokasi_tujuan, $stock_current_toko, $user_id, $satuan_toko);
+                    }
+                    
+                    if (!$stmt_update_stock_toko->execute()) {
+                        throw new Exception('Gagal mengupdate stock toko: ' . $stmt_update_stock_toko->error);
+                    }
+                    $stmt_update_stock_toko->close();
+                }
+                $stmt_barang_toko->close();
             }
         }
         
@@ -983,20 +1197,19 @@ $active_page = 'stock';
                         <table class="table table-bordered table-hover" id="tableKoreksiTransfer">
                             <thead class="table-light sticky-top">
                                 <tr>
-                                    <th>ID Detail Transfer</th>
-                                    <th>Kode Barang</th>
-                                    <th>Merek</th>
-                                    <th>Kategori</th>
-                                    <th>Nama Barang</th>
-                                    <th>Total Pesan Transfer (dus)</th>
-                                    <th>Total Kirim (dus)</th>
-                                    <th>Batch</th>
-                                    <th>Total Masuk (dus)</th>
-                                    <th>Total Kirim Baru (dus)</th>
-                                    <th>Jumlah per Dus</th>
-                                    <th>Total Masuk (pieces)</th>
-                                    <th>Stock Sekarang (pieces)</th>
-                                    <th>Jumlah Stock Akhir (pieces)</th>
+                                    <th style="vertical-align: middle;">ID Detail Transfer</th>
+                                    <th style="vertical-align: middle;">Kode Barang</th>
+                                    <th style="vertical-align: middle;">Merek</th>
+                                    <th style="vertical-align: middle;">Kategori</th>
+                                    <th style="vertical-align: middle;">Nama Barang</th>
+                                    <th style="vertical-align: middle;">Total Pesan Transfer (dus)</th>
+                                    <th style="vertical-align: middle;">Batch</th>
+                                    <th style="vertical-align: middle;">Total Kirim (dus)</th>
+                                    <th style="vertical-align: middle;">Total Masuk (dus)</th>
+                                    <th style="vertical-align: middle;">Jumlah per Dus</th>
+                                    <th style="vertical-align: middle;">Total Masuk (pieces)</th>
+                                    <th style="vertical-align: middle;">Stock Sekarang (pieces)</th>
+                                    <th style="vertical-align: middle;">Jumlah Stock Akhir (pieces)</th>
                                 </tr>
                             </thead>
                             <tbody id="tbodyKoreksiTransfer">
@@ -1140,23 +1353,24 @@ $active_page = 'stock';
                         var isDikirim = response.status_koreksi == 'DIKIRIM';
                         var thead = $('#tableKoreksiTransfer thead tr');
                         thead.empty();
-                        thead.append('<th>ID Detail Transfer</th>');
-                        thead.append('<th>Kode Barang</th>');
-                        thead.append('<th>Merek</th>');
-                        thead.append('<th>Kategori</th>');
-                        thead.append('<th>Nama Barang</th>');
-                        thead.append('<th>Total Pesan Transfer (dus)</th>');
-                        thead.append('<th>Batch</th>');
-                        thead.append('<th>Total Kirim (dus)</th>');
+                        thead.append('<th style="vertical-align: middle;">ID Detail Transfer</th>');
+                        thead.append('<th style="vertical-align: middle;">Kode Barang</th>');
+                        thead.append('<th style="vertical-align: middle;">Merek</th>');
+                        thead.append('<th style="vertical-align: middle;">Kategori</th>');
+                        thead.append('<th style="vertical-align: middle;">Nama Barang</th>');
+                        thead.append('<th style="vertical-align: middle;">Total Pesan Transfer (dus)</th>');
+                        thead.append('<th style="vertical-align: middle;">Batch</th>');
+                        thead.append('<th style="vertical-align: middle;">Total Kirim (dus)</th>');
                         if (isDikirim) {
-                            thead.append('<th>Kirim Semua</th>');
+                            thead.append('<th style="vertical-align: middle;">Kirim Semua</th>');
                         }
                         if (!isDikirim) {
-                            thead.append('<th>Total Masuk (dus)</th>');
-                            thead.append('<th>Jumlah per Dus</th>');
-                            thead.append('<th>Total Masuk (pieces)</th>');
-                            thead.append('<th>Stock Sekarang (pieces)</th>');
-                            thead.append('<th>Jumlah Stock Akhir (pieces)</th>');
+                            thead.append('<th style="vertical-align: middle;">Total Masuk (dus)</th>');
+                            thead.append('<th style="vertical-align: middle;">Jumlah per Dus</th>');
+                            thead.append('<th style="vertical-align: middle;">Total Masuk (pieces)</th>');
+                            thead.append('<th style="vertical-align: middle;">Stock Sekarang (pieces)</th>');
+                            thead.append('<th style="vertical-align: middle;">Jumlah Stock Akhir (pieces)</th>');
+                            thead.append('<th style="vertical-align: middle;">Kirim dan Masuk Semua</th>');
                         }
                         
                         // Render tabel
@@ -1199,7 +1413,7 @@ $active_page = 'stock';
             var isDikirim = statusKoreksi == 'DIKIRIM';
             
             if (data.length === 0) {
-                var colCount = isDikirim ? 9 : 13;
+                var colCount = isDikirim ? 9 : 14;
                 tbody.append('<tr><td colspan="' + colCount + '" class="text-center text-muted">Tidak ada data</td></tr>');
                 return;
             }
@@ -1233,7 +1447,17 @@ $active_page = 'stock';
                                 'data-batch-index="' + batchIndex + '" ' +
                                 'style="width: 100px;">';
                         } else {
-                            batchHtml += '<span class="text-muted">Kirim: ' + numberFormat(batch.jumlah_kirim_dus) + ' dus</span><br>' +
+                            // Untuk status SELESAI, bisa rubah kirim, tiba, dan ditolak
+                            batchHtml += '<label class="form-label small mb-1">Kirim (dus):</label>' +
+                                '<input type="number" class="form-control form-control-sm batch-kirim-dus" ' +
+                                'min="0" max="' + jumlahPesanBatch + '" ' +
+                                'value="' + batch.jumlah_kirim_dus + '" ' +
+                                'data-id-detail="' + escapeHtml(item.id_detail_transfer) + '" ' +
+                                'data-id-batch="' + escapeHtml(batch.id_detail_transfer_batch) + '" ' +
+                                'data-jumlah-pesan="' + jumlahPesanBatch + '" ' +
+                                'data-index="' + index + '" ' +
+                                'data-batch-index="' + batchIndex + '" ' +
+                                'style="width: 100px;">' +
                                 '<label class="form-label small mb-1 mt-1">Tiba (dus):</label>' +
                                 '<input type="number" class="form-control form-control-sm batch-diterima-dus" ' +
                                 'min="0" max="' + batch.jumlah_kirim_dus + '" ' +
@@ -1279,11 +1503,20 @@ $active_page = 'stock';
                         'data-id-detail="' + escapeHtml(item.id_detail_transfer) + '" ' +
                         'data-index="' + index + '"></td>';
                 } else {
-                    row += '<td class="total-masuk-dus">' + numberFormat(item.jumlah_masuk_dus) + '</td>' +
+                    row += '<td class="total-kirim-dus">' + numberFormat(item.jumlah_kirim_dus) + '</td>' +
+                        '<td class="total-masuk-dus">' + numberFormat(item.jumlah_masuk_dus) + '</td>' +
                         '<td>' + numberFormat(item.satuan_perdus) + '</td>' +
                         '<td class="total-masuk-pieces">' + numberFormat(item.jumlah_masuk_dus * item.satuan_perdus) + '</td>' +
                         '<td>' + numberFormat(item.stock_sekarang) + '</td>' +
-                        '<td class="jumlah-stock-akhir">' + numberFormat(jumlahStockAkhir) + '</td>';
+                        '<td class="jumlah-stock-akhir">' + numberFormat(jumlahStockAkhir) + '</td>' +
+                        '<td style="vertical-align: middle; text-align: center;">' +
+                        '<div class="form-check d-inline-block">' +
+                        '<input type="checkbox" class="form-check-input kirim-masuk-semua-checkbox" ' +
+                        'data-id-detail="' + escapeHtml(item.id_detail_transfer) + '" ' +
+                        'data-index="' + index + '" id="kirim-masuk-semua-' + index + '">' +
+                        '<label class="form-check-label small" for="kirim-masuk-semua-' + index + '">Kirim dan Masuk Semua</label>' +
+                        '</div>' +
+                        '</td>';
                 }
                 
                 row += '</tr>';
@@ -1345,13 +1578,70 @@ $active_page = 'stock';
                 });
             }
             
+            // Event listener untuk input jumlah kirim per batch (untuk status SELESAI)
+            if (!isDikirim) {
+                $(document).off('input', '.batch-kirim-dus').on('input', '.batch-kirim-dus', function() {
+                    var $input = $(this);
+                    var index = $input.data('index');
+                    var idBatch = $input.data('id-batch');
+                    var jumlahKirim = parseInt($input.val()) || 0;
+                    var jumlahPesan = parseInt($input.data('jumlah-pesan')) || 0;
+                    
+                    // Validasi: tidak boleh melebihi jumlah pesan batch
+                    if (jumlahKirim > jumlahPesan) {
+                        $input.val(jumlahPesan);
+                        jumlahKirim = jumlahPesan;
+                    }
+                    
+                    // Validasi: tidak boleh negatif
+                    if (jumlahKirim < 0) {
+                        $input.val(0);
+                        jumlahKirim = 0;
+                    }
+                    
+                    // Update data-jumlah-kirim untuk batch ini
+                    $input.attr('data-jumlah-kirim', jumlahKirim);
+                    
+                    // Update max untuk batch-diterima-dus dan batch-ditolak-dus yang sama
+                    var $diterimaInput = $('.batch-diterima-dus[data-id-batch="' + idBatch + '"]');
+                    var $ditolakInput = $('.batch-ditolak-dus[data-id-batch="' + idBatch + '"]');
+                    var jumlahTiba = parseInt($diterimaInput.val()) || 0;
+                    var jumlahDitolak = parseInt($ditolakInput.val()) || 0;
+                    
+                    // Update max dan data-jumlah-kirim
+                    $diterimaInput.attr('max', jumlahKirim);
+                    $diterimaInput.attr('data-jumlah-kirim', jumlahKirim);
+                    $ditolakInput.attr('max', jumlahKirim);
+                    $ditolakInput.attr('data-jumlah-kirim', jumlahKirim);
+                    
+                    // Jika jumlah tiba melebihi jumlah kirim baru, set ke jumlah kirim
+                    if (jumlahTiba > jumlahKirim) {
+                        $diterimaInput.val(jumlahKirim);
+                        jumlahTiba = jumlahKirim;
+                    }
+                    
+                    // Jika jumlah ditolak melebihi jumlah tiba, set ke jumlah tiba
+                    if (jumlahDitolak > jumlahTiba) {
+                        $ditolakInput.val(jumlahTiba);
+                    }
+                    
+                    // Update checkbox "Kirim dan Masuk Semua"
+                    if (!isDikirim) {
+                        updateCheckboxKirimMasukSemua(index);
+                    }
+                    
+                    calculateKoreksiTransfer(index, isDikirim);
+                });
+            }
+            
             // Event listener untuk input jumlah tiba per batch
             $(document).off('input', '.batch-diterima-dus').on('input', '.batch-diterima-dus', function() {
                 var $input = $(this);
                 var index = $input.data('index');
                 var idBatch = $input.data('id-batch');
                 var jumlahTiba = parseInt($input.val()) || 0;
-                var jumlahKirim = parseInt($input.data('jumlah-kirim')) || 0;
+                // Ambil jumlah kirim dari input atau data attribute
+                var jumlahKirim = parseInt($input.attr('data-jumlah-kirim')) || parseInt($input.data('jumlah-kirim')) || 0;
                 
                 // Validasi: tidak boleh melebihi jumlah kirim
                 if (jumlahTiba > jumlahKirim) {
@@ -1372,6 +1662,11 @@ $active_page = 'stock';
                     $ditolakInput.val(jumlahTiba);
                 }
                 $ditolakInput.attr('max', jumlahTiba);
+                
+                // Update checkbox "Kirim dan Masuk Semua"
+                if (!isDikirim) {
+                    updateCheckboxKirimMasukSemua(index);
+                }
                 
                 calculateKoreksiTransfer(index, isDikirim);
             });
@@ -1396,8 +1691,101 @@ $active_page = 'stock';
                     jumlahDitolak = 0;
                 }
                 
+                // Update checkbox "Kirim dan Masuk Semua"
+                if (!isDikirim) {
+                    updateCheckboxKirimMasukSemua(index);
+                }
+                
                 calculateKoreksiTransfer(index, isDikirim);
             });
+            
+            // Event listener untuk checkbox "Kirim dan Masuk Semua" (untuk status SELESAI)
+            if (!isDikirim) {
+                $(document).off('change', '.kirim-masuk-semua-checkbox').on('change', '.kirim-masuk-semua-checkbox', function() {
+                    var $checkbox = $(this);
+                    var idDetail = $checkbox.data('id-detail');
+                    var isChecked = $checkbox.is(':checked');
+                    
+                    if (isChecked) {
+                        // Set semua batch: kirim = jumlah pesan, tiba = jumlah kirim, ditolak = 0
+                        $('.batch-kirim-dus[data-id-detail="' + idDetail + '"]').each(function() {
+                            var $inputKirim = $(this);
+                            var jumlahPesan = parseInt($inputKirim.data('jumlah-pesan')) || 0;
+                            var idBatch = $inputKirim.data('id-batch');
+                            
+                            // Set kirim = jumlah pesan
+                            $inputKirim.val(jumlahPesan);
+                            $inputKirim.attr('data-jumlah-kirim', jumlahPesan);
+                            
+                            // Set tiba = jumlah kirim (jumlah pesan)
+                            var $inputTiba = $('.batch-diterima-dus[data-id-batch="' + idBatch + '"]');
+                            $inputTiba.val(jumlahPesan);
+                            $inputTiba.attr('data-jumlah-kirim', jumlahPesan);
+                            $inputTiba.attr('max', jumlahPesan);
+                            
+                            // Set ditolak = 0
+                            var $inputDitolak = $('.batch-ditolak-dus[data-id-batch="' + idBatch + '"]');
+                            $inputDitolak.val(0);
+                            $inputDitolak.attr('max', jumlahPesan);
+                            $inputDitolak.attr('data-jumlah-kirim', jumlahPesan);
+                        });
+                    } else {
+                        // Reset semua batch ke 0
+                        $('.batch-kirim-dus[data-id-detail="' + idDetail + '"]').each(function() {
+                            var $inputKirim = $(this);
+                            var idBatch = $inputKirim.data('id-batch');
+                            
+                            $inputKirim.val(0);
+                            $inputKirim.attr('data-jumlah-kirim', 0);
+                            
+                            var $inputTiba = $('.batch-diterima-dus[data-id-batch="' + idBatch + '"]');
+                            $inputTiba.val(0);
+                            $inputTiba.attr('data-jumlah-kirim', 0);
+                            $inputTiba.attr('max', 0);
+                            
+                            var $inputDitolak = $('.batch-ditolak-dus[data-id-batch="' + idBatch + '"]');
+                            $inputDitolak.val(0);
+                            $inputDitolak.attr('max', 0);
+                            $inputDitolak.attr('data-jumlah-kirim', 0);
+                        });
+                    }
+                    
+                    var index = $checkbox.data('index');
+                    calculateKoreksiTransfer(index, false);
+                });
+            }
+        }
+        
+        function updateCheckboxKirimMasukSemua(index) {
+            var idDetail = $('tr[data-index="' + index + '"]').data('id-detail');
+            var semuaTerisiPenuh = true;
+            var adaYangTerisi = false;
+            
+            $('.batch-kirim-dus[data-id-detail="' + idDetail + '"]').each(function() {
+                var $inputKirim = $(this);
+                var jumlahKirim = parseInt($inputKirim.val()) || 0;
+                var jumlahPesan = parseInt($inputKirim.data('jumlah-pesan')) || 0;
+                var idBatch = $inputKirim.data('id-batch');
+                
+                var jumlahTiba = parseInt($('.batch-diterima-dus[data-id-batch="' + idBatch + '"]').val()) || 0;
+                var jumlahDitolak = parseInt($('.batch-ditolak-dus[data-id-batch="' + idBatch + '"]').val()) || 0;
+                
+                if (jumlahKirim > 0 || jumlahTiba > 0 || jumlahDitolak > 0) {
+                    adaYangTerisi = true;
+                }
+                
+                // Cek apakah kirim = pesan, tiba = kirim, dan ditolak = 0
+                if (jumlahKirim < jumlahPesan || jumlahTiba < jumlahKirim || jumlahDitolak > 0) {
+                    semuaTerisiPenuh = false;
+                }
+            });
+            
+            var $checkbox = $('.kirim-masuk-semua-checkbox[data-index="' + index + '"]');
+            if (semuaTerisiPenuh && adaYangTerisi) {
+                $checkbox.prop('checked', true);
+            } else {
+                $checkbox.prop('checked', false);
+            }
         }
         
         function calculateKoreksiTransfer(index, isDikirim) {
@@ -1418,6 +1806,13 @@ $active_page = 'stock';
                 var jumlahPerDusText = row.find('td').eq(9).text().replace(/\./g, '');
                 var satuanPerdus = parseInt(jumlahPerDusText) || 1;
                 
+                // Hitung total kirim dari semua batch (untuk status SELESAI)
+                var totalKirimDus = 0;
+                $('.batch-kirim-dus[data-id-detail="' + idDetail + '"]').each(function() {
+                    var jumlahKirim = parseInt($(this).val()) || 0;
+                    totalKirimDus += jumlahKirim;
+                });
+                
                 // Hitung total dari semua batch
                 var totalMasukDus = 0;
                 $('.batch-diterima-dus[data-id-detail="' + idDetail + '"]').each(function() {
@@ -1435,6 +1830,7 @@ $active_page = 'stock';
                 var totalMasukPieces = totalMasukDus * satuanPerdus;
                 
                 // Update tampilan
+                row.find('.total-kirim-dus').text(numberFormat(totalKirimDus));
                 row.find('.total-masuk-dus').text(numberFormat(totalMasukDus));
                 row.find('.total-masuk-pieces').text(numberFormat(totalMasukPieces));
                 
@@ -1452,7 +1848,7 @@ $active_page = 'stock';
                 var oldTotalMasukDus = parseInt(row.find('.total-masuk-dus').data('old-value')) || 0;
                 var oldTotalMasukPieces = oldTotalMasukDus * satuanPerdus;
                 var selisihPieces = totalMasukPieces - oldTotalMasukPieces;
-                var jumlahStockAkhir = stockSekarang - selisihPieces; // Negatif karena mengurangi stock gudang
+                var jumlahStockAkhir = stockSekarang - selisihPieces; // Kurangi karena mengurangi stock gudang saat total masuk bertambah
                 
                 row.find('.jumlah-stock-akhir').text(numberFormat(jumlahStockAkhir));
             }
@@ -1479,16 +1875,19 @@ $active_page = 'stock';
                     });
                 });
             } else {
-                $('.batch-diterima-dus').each(function() {
-                    var $input = $(this);
-                    var idDetail = $input.data('id-detail');
-                    var idBatch = $input.data('id-batch');
-                    var jumlahDiterimaDus = parseInt($input.val()) || 0;
+                // Untuk status SELESAI, kumpulkan kirim, tiba, dan ditolak
+                $('.batch-kirim-dus').each(function() {
+                    var $inputKirim = $(this);
+                    var idDetail = $inputKirim.data('id-detail');
+                    var idBatch = $inputKirim.data('id-batch');
+                    var jumlahKirimDus = parseInt($inputKirim.val()) || 0;
+                    var jumlahDiterimaDus = parseInt($('.batch-diterima-dus[data-id-batch="' + idBatch + '"]').val()) || 0;
                     var jumlahDitolakDus = parseInt($('.batch-ditolak-dus[data-id-batch="' + idBatch + '"]').val()) || 0;
                     
                     batchKoreksi.push({
                         id_detail_transfer: idDetail,
                         id_detail_transfer_batch: idBatch,
+                        jumlah_kirim_dus: jumlahKirimDus,
                         jumlah_diterima_dus: jumlahDiterimaDus,
                         jumlah_ditolak_dus: jumlahDitolakDus
                     });
