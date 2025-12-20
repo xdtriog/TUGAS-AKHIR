@@ -468,50 +468,103 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                     //            d(8)=harga_pieces, d(9)=total_uang, s(10)=ref
                     // Total: 10 parameter (ssssiiiidds = 11 karakter, salah!)
                     // Seharusnya: ssssiiidds = 10 karakter (harga_barang_pieces adalah double, bukan int)
-                    $stmt_mutasi_rusak->bind_param("ssssiiidds", $id_mutasi_rusak, $kd_barang, $kd_lokasi_asal, $user_id, $jumlah_rusak_batch_dus, $satuan_perdus, $jumlah_rusak_batch_pieces, $harga_barang_pieces, $total_uang, $id_batch);
+                    // KD_LOKASI harus lokasi toko (tujuan), bukan gudang (asal)
+                    $stmt_mutasi_rusak->bind_param("ssssiiidds", $id_mutasi_rusak, $kd_barang, $kd_lokasi, $user_id, $jumlah_rusak_batch_dus, $satuan_perdus, $jumlah_rusak_batch_pieces, $harga_barang_pieces, $total_uang, $id_batch);
                     if (!$stmt_mutasi_rusak->execute()) {
                         throw new Exception('Gagal insert mutasi rusak: ' . $stmt_mutasi_rusak->error);
                     }
                 }
             }
             
-            // Insert ke STOCK_HISTORY untuk gudang (lokasi asal) dengan REF = ID_DETAIL_TRANSFER_BARANG
-            // Hitung jumlah rusak total = Total Kirim - Total Masuk
-            $jumlah_rusak_dus = $jumlah_kirim_dus - $total_masuk_dus;
+            // Insert ke STOCK_HISTORY untuk toko (lokasi tujuan) dengan REF = ID_MUTASI_BARANG_RUSAK per batch
+            // Catat mutasi rusak per batch ke STOCK_HISTORY toko
+            // Query ulang batch untuk mendapatkan ID_MUTASI_BARANG_RUSAK yang sudah dibuat
+            $query_batch_mutasi = "SELECT dtbb.ID_DETAIL_TRANSFER_BARANG_BATCH, 
+                                          dtbb.JUMLAH_KIRIM_DUS, 
+                                          dtbb.JUMLAH_MASUK_DUS,
+                                          mbr.ID_MUTASI_BARANG_RUSAK
+                                   FROM DETAIL_TRANSFER_BARANG_BATCH dtbb
+                                   LEFT JOIN MUTASI_BARANG_RUSAK mbr ON mbr.REF = dtbb.ID_DETAIL_TRANSFER_BARANG_BATCH
+                                   WHERE dtbb.ID_DETAIL_TRANSFER_BARANG = ?
+                                   ORDER BY dtbb.ID_DETAIL_TRANSFER_BARANG_BATCH ASC";
+            $stmt_batch_mutasi = $conn->prepare($query_batch_mutasi);
+            if (!$stmt_batch_mutasi) {
+                throw new Exception('Gagal prepare query batch mutasi: ' . $conn->error);
+            }
+            $stmt_batch_mutasi->bind_param("s", $id_detail);
+            $stmt_batch_mutasi->execute();
+            $result_batch_mutasi = $stmt_batch_mutasi->get_result();
             
-            // Hanya jika ada selisih total (bukan per batch)
-            if ($jumlah_rusak_dus != 0) {
-                // Insert ke STOCK_HISTORY untuk gudang (lokasi asal) dengan REF = ID_DETAIL_TRANSFER_BARANG
-                // Semua nilai dalam DUS
-                // Generate ID_HISTORY_STOCK dengan format SKHY+UUID (total 16 karakter: SKHY=4, UUID=12)
-                $id_history_gudang = '';
-                do {
-                    $uuid = ShortIdGenerator::generate(12, '');
-                    $id_history_gudang = 'SKHY' . $uuid;
-                } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history_gudang));
+            // Stock awal toko untuk mutasi rusak = stock setelah transfer masuk (jumlah_akhir)
+            $stock_awal_toko = $jumlah_akhir;
+            
+            // Loop setiap batch dan catat ke STOCK_HISTORY jika ada mutasi
+            while ($batch_mutasi_data = $result_batch_mutasi->fetch_assoc()) {
+                $id_mutasi_rusak = $batch_mutasi_data['ID_MUTASI_BARANG_RUSAK'] ?? '';
                 
-                // Untuk STOCK_HISTORY gudang:
-                // JUMLAH_AWAL = jumlah dikirim (dalam DUS)
-                // JUMLAH_PERUBAHAN = -(total kirim - total masuk) = -jumlah rusak (negatif karena mengurangi stock gudang)
-                // JUMLAH_AKHIR = total masuk (dalam DUS)
-                // SATUAN = 'DUS'
-                $jumlah_awal_history_gudang = $jumlah_kirim_dus;
-                $jumlah_perubahan_history_gudang = -$jumlah_rusak_dus; // negatif karena mengurangi stock gudang
-                $jumlah_akhir_history_gudang = $total_masuk_dus;
-                $satuan_history_gudang = 'DUS';
-                
-                $insert_history_gudang = "INSERT INTO STOCK_HISTORY 
-                                        (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, 'RUSAK', ?, ?)";
-                $stmt_history_gudang = $conn->prepare($insert_history_gudang);
-                if (!$stmt_history_gudang) {
-                    throw new Exception('Gagal prepare query insert history gudang: ' . $conn->error);
-                }
-                $stmt_history_gudang->bind_param("ssssiiiss", $id_history_gudang, $kd_barang, $kd_lokasi_asal, $user_id, $jumlah_awal_history_gudang, $jumlah_perubahan_history_gudang, $jumlah_akhir_history_gudang, $id_detail, $satuan_history_gudang);
-                if (!$stmt_history_gudang->execute()) {
-                    throw new Exception('Gagal insert history gudang: ' . $stmt_history_gudang->error);
+                // Hanya catat jika ada mutasi rusak (ID_MUTASI_BARANG_RUSAK tidak kosong)
+                if (!empty($id_mutasi_rusak)) {
+                    $jumlah_kirim_batch_dus = intval($batch_mutasi_data['JUMLAH_KIRIM_DUS'] ?? 0);
+                    $jumlah_masuk_batch_dus = intval($batch_mutasi_data['JUMLAH_MASUK_DUS'] ?? 0);
+                    
+                    // Hitung selisih batch = JUMLAH_MASUK_DUS - JUMLAH_KIRIM_DUS
+                    // Jika negatif = ada yang rusak/hilang (masuk < kirim)
+                    // Jika positif = kelebihan (masuk > kirim)
+                    $jumlah_rusak_batch_dus = $jumlah_masuk_batch_dus - $jumlah_kirim_batch_dus;
+                    $jumlah_rusak_batch_pieces = $jumlah_rusak_batch_dus * $satuan_perdus;
+                    
+                    // Untuk STOCK_HISTORY toko dengan tipe RUSAK:
+                    // JUMLAH_AWAL = stock toko setelah transfer masuk (akan diupdate per batch)
+                    // JUMLAH_PERUBAHAN = selisih batch (bisa negatif jika rusak, positif jika kelebihan)
+                    // JUMLAH_AKHIR = JUMLAH_AWAL + JUMLAH_PERUBAHAN
+                    // REF = ID_MUTASI_BARANG_RUSAK
+                    // SATUAN = satuan stock toko
+                    
+                    $jumlah_awal_history_toko = $stock_awal_toko;
+                    $jumlah_perubahan_history_toko = $jumlah_rusak_batch_pieces; // Bisa negatif atau positif
+                    $jumlah_akhir_history_toko = $jumlah_awal_history_toko + $jumlah_perubahan_history_toko;
+                    
+                    // Generate ID_HISTORY_STOCK dengan format SKHY+UUID (total 16 karakter: SKHY=4, UUID=12)
+                    $id_history_toko = '';
+                    do {
+                        $uuid = ShortIdGenerator::generate(12, '');
+                        $id_history_toko = 'SKHY' . $uuid;
+                    } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history_toko));
+                    
+                    $insert_history_toko = "INSERT INTO STOCK_HISTORY 
+                                            (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, 'RUSAK', ?, ?)";
+                    $stmt_history_toko = $conn->prepare($insert_history_toko);
+                    if (!$stmt_history_toko) {
+                        throw new Exception('Gagal prepare query insert history toko: ' . $conn->error);
+                    }
+                    $stmt_history_toko->bind_param("ssssiiiss", $id_history_toko, $kd_barang, $kd_lokasi, $user_id, $jumlah_awal_history_toko, $jumlah_perubahan_history_toko, $jumlah_akhir_history_toko, $id_mutasi_rusak, $satuan);
+                    if (!$stmt_history_toko->execute()) {
+                        throw new Exception('Gagal insert history toko: ' . $stmt_history_toko->error);
+                    }
+                    $stmt_history_toko->close();
+                    
+                    // Update stock_awal_toko untuk batch berikutnya
+                    $stock_awal_toko = $jumlah_akhir_history_toko;
+                    
+                    // Update STOCK toko dengan stock setelah mutasi rusak
+                    $update_stock_toko = "UPDATE STOCK 
+                                        SET JUMLAH_BARANG = ?, 
+                                            LAST_UPDATED = CURRENT_TIMESTAMP,
+                                            UPDATED_BY = ?
+                                        WHERE KD_BARANG = ? AND KD_LOKASI = ?";
+                    $stmt_update_stock_toko = $conn->prepare($update_stock_toko);
+                    if (!$stmt_update_stock_toko) {
+                        throw new Exception('Gagal prepare query update stock toko: ' . $conn->error);
+                    }
+                    $stmt_update_stock_toko->bind_param("isss", $jumlah_akhir_history_toko, $user_id, $kd_barang, $kd_lokasi);
+                    if (!$stmt_update_stock_toko->execute()) {
+                        throw new Exception('Gagal update stock toko: ' . $stmt_update_stock_toko->error);
+                    }
+                    $stmt_update_stock_toko->close();
                 }
             }
+            $stmt_batch_mutasi->close();
         }
         
         // Commit transaksi

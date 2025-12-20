@@ -281,56 +281,33 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     exit();
 }
 
-// Get parameter kd_barang
-$kd_barang = isset($_GET['kd_barang']) ? trim($_GET['kd_barang']) : '';
+// Get parameter kd_lokasi
+$kd_lokasi = isset($_GET['kd_lokasi']) ? trim($_GET['kd_lokasi']) : '';
 
-if (empty($kd_barang)) {
+if (empty($kd_lokasi)) {
     header("Location: stock.php");
     exit();
 }
 
-// Query untuk mendapatkan data barang (tidak filter status agar bisa lihat riwayat barang tidak aktif)
-$query_barang = "SELECT 
-    mb.KD_BARANG,
-    mb.NAMA_BARANG,
-    mb.BERAT,
-    mb.STATUS as STATUS_BARANG,
-    COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
-    COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI
-FROM MASTER_BARANG mb
-LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
-LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
-WHERE mb.KD_BARANG = ?";
-$stmt_barang = $conn->prepare($query_barang);
-$stmt_barang->bind_param("s", $kd_barang);
-$stmt_barang->execute();
-$result_barang = $stmt_barang->get_result();
+// Query untuk mendapatkan informasi lokasi
+$query_lokasi = "SELECT KD_LOKASI, NAMA_LOKASI, ALAMAT_LOKASI, TYPE_LOKASI 
+                 FROM MASTER_LOKASI 
+                 WHERE KD_LOKASI = ? AND TYPE_LOKASI = 'gudang' AND STATUS = 'AKTIF'";
+$stmt_lokasi = $conn->prepare($query_lokasi);
+$stmt_lokasi->bind_param("s", $kd_lokasi);
+$stmt_lokasi->execute();
+$result_lokasi = $stmt_lokasi->get_result();
 
-if ($result_barang->num_rows == 0) {
+if ($result_lokasi->num_rows == 0) {
     header("Location: stock.php");
     exit();
 }
 
-$barang = $result_barang->fetch_assoc();
+$lokasi = $result_lokasi->fetch_assoc();
 
-// Query untuk mendapatkan lokasi dari riwayat pembelian pertama (untuk header)
-$query_lokasi_header = "SELECT DISTINCT
-    ml.NAMA_LOKASI,
-    ml.ALAMAT_LOKASI
-FROM PESAN_BARANG pb
-LEFT JOIN MASTER_LOKASI ml ON pb.KD_LOKASI = ml.KD_LOKASI
-WHERE pb.KD_BARANG = ? AND ml.NAMA_LOKASI IS NOT NULL
-LIMIT 1";
-$stmt_lokasi_header = $conn->prepare($query_lokasi_header);
-$stmt_lokasi_header->bind_param("s", $kd_barang);
-$stmt_lokasi_header->execute();
-$result_lokasi_header = $stmt_lokasi_header->get_result();
-$lokasi_header = $result_lokasi_header->num_rows > 0 ? $result_lokasi_header->fetch_assoc() : ['NAMA_LOKASI' => '', 'ALAMAT_LOKASI' => ''];
-
-// Query untuk mendapatkan riwayat pembelian
+// Query untuk mendapatkan riwayat pembelian untuk lokasi gudang ini (semua barang)
 $query_riwayat = "SELECT 
     pb.ID_PESAN_BARANG,
-    pb.KD_LOKASI,
     pb.KD_BARANG,
     pb.KD_SUPPLIER,
     pb.JUMLAH_PESAN_BARANG_DUS,
@@ -340,13 +317,12 @@ $query_riwayat = "SELECT
     pb.JUMLAH_TIBA_DUS,
     pb.JUMLAH_DITOLAK_DUS,
     pb.SISA_STOCK_DUS,
+    pb.TGL_EXPIRED,
     pb.WAKTU_PESAN,
     pb.WAKTU_ESTIMASI_SELESAI,
     pb.WAKTU_SELESAI,
     pb.STATUS,
     pb.ID_PERHITUNGAN_KUANTITAS_POQ,
-    pb.TGL_EXPIRED,
-    ml.NAMA_LOKASI,
     mb.NAMA_BARANG,
     mb.BERAT,
     COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
@@ -355,12 +331,11 @@ $query_riwayat = "SELECT
     COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER,
     COALESCE(ms.ALAMAT_SUPPLIER, '-') as ALAMAT_SUPPLIER
 FROM PESAN_BARANG pb
-LEFT JOIN MASTER_LOKASI ml ON pb.KD_LOKASI = ml.KD_LOKASI
-LEFT JOIN MASTER_BARANG mb ON pb.KD_BARANG = mb.KD_BARANG
+INNER JOIN MASTER_BARANG mb ON pb.KD_BARANG = mb.KD_BARANG
 LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
 LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
 LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
-WHERE pb.KD_BARANG = ?
+WHERE pb.KD_LOKASI = ?
 ORDER BY 
     CASE pb.STATUS
         WHEN 'DIPESAN' THEN 1
@@ -376,9 +351,10 @@ ORDER BY
     CASE pb.STATUS
         WHEN 'SELESAI' THEN pb.WAKTU_SELESAI
         ELSE NULL
-    END DESC";
+    END DESC,
+    pb.WAKTU_PESAN DESC";
 $stmt_riwayat = $conn->prepare($query_riwayat);
-$stmt_riwayat->bind_param("s", $kd_barang);
+$stmt_riwayat->bind_param("s", $kd_lokasi);
 $stmt_riwayat->execute();
 $result_riwayat = $stmt_riwayat->get_result();
 
@@ -446,7 +422,7 @@ $active_page = 'stock';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pemilik - Riwayat Pembelian</title>
+    <title>Pemilik - Riwayat Pembelian - <?php echo htmlspecialchars($lokasi['NAMA_LOKASI']); ?></title>
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- DataTables CSS -->
@@ -463,43 +439,10 @@ $active_page = 'stock';
     <div class="main-content">
         <!-- Page Header -->
         <div class="page-header">
-            <h1 class="page-title">Pemilik - Riwayat Pembelian - <?php echo htmlspecialchars($lokasi_header['NAMA_LOKASI'] ?: 'Gudang'); ?></h1>
-            <?php if (!empty($lokasi_header['ALAMAT_LOKASI'])): ?>
-                <p class="text-muted mb-0"><?php echo htmlspecialchars($lokasi_header['ALAMAT_LOKASI']); ?></p>
+            <h1 class="page-title">Pemilik - Riwayat Pembelian - <?php echo htmlspecialchars($lokasi['NAMA_LOKASI']); ?></h1>
+            <?php if (!empty($lokasi['ALAMAT_LOKASI'])): ?>
+                <p class="text-muted mb-0"><?php echo htmlspecialchars($lokasi['ALAMAT_LOKASI']); ?></p>
             <?php endif; ?>
-        </div>
-
-        <!-- Item Details Section -->
-        <div class="card mb-4">
-            <div class="card-body">
-                <h5 class="card-title mb-4">Informasi Barang</h5>
-                <div class="row">
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label fw-bold">Kode Barang</label>
-                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($barang['KD_BARANG']); ?>" readonly style="background-color: #e9ecef;">
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label fw-bold">Merek Barang</label>
-                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($barang['NAMA_MEREK']); ?>" readonly style="background-color: #e9ecef;">
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label fw-bold">Kategori Barang</label>
-                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($barang['NAMA_KATEGORI']); ?>" readonly style="background-color: #e9ecef;">
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label fw-bold">Berat Barang (gr)</label>
-                        <input type="text" class="form-control" value="<?php echo number_format($barang['BERAT'], 0, ',', '.'); ?>" readonly style="background-color: #e9ecef;">
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label fw-bold">Nama Barang</label>
-                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($barang['NAMA_BARANG']); ?>" readonly style="background-color: #e9ecef;">
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label fw-bold">Status Barang</label>
-                        <input type="text" class="form-control" value="<?php echo htmlspecialchars($barang['STATUS_BARANG'] == 'AKTIF' ? 'Aktif' : 'Tidak Aktif'); ?>" readonly style="background-color: #e9ecef;">
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- Table Riwayat Pembelian -->
@@ -509,6 +452,8 @@ $active_page = 'stock';
                     <thead>
                         <tr>
                             <th>ID PESAN</th>
+                            <th>Kode Barang</th>
+                            <th>Nama Barang</th>
                             <th>Supplier</th>
                             <th>Waktu</th>
                             <th>Sisa Stock (dus)</th>
@@ -528,11 +473,13 @@ $active_page = 'stock';
                             <?php while ($row = $result_riwayat->fetch_assoc()): ?>
                                 <tr>
                                     <td><?php echo htmlspecialchars($row['ID_PESAN_BARANG']); ?></td>
+                                    <td><?php echo htmlspecialchars($row['KD_BARANG']); ?></td>
+                                    <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
                                     <td>
                                         <?php 
                                         $supplier_display = '';
-                                        if ($row['SUPPLIER_KD'] != '-' && $row['NAMA_SUPPLIER'] != '-') {
-                                            $supplier_display = htmlspecialchars($row['SUPPLIER_KD'] . ' - ' . $row['NAMA_SUPPLIER']);
+                                        if ($row['NAMA_SUPPLIER'] != '-') {
+                                            $supplier_display = htmlspecialchars($row['NAMA_SUPPLIER']);
                                             if ($row['ALAMAT_SUPPLIER'] != '-') {
                                                 $supplier_display .= ' - ' . htmlspecialchars($row['ALAMAT_SUPPLIER']);
                                             }
@@ -604,7 +551,7 @@ $active_page = 'stock';
                                         <div class="d-flex flex-column gap-1">
                                             <span class="badge bg-<?php echo $status_class; ?>"><?php echo $status_text; ?></span>
                                             <?php if (!empty($row['ID_PERHITUNGAN_KUANTITAS_POQ'])): ?>
-                                                <span class="badge mt-1" style="background-color: #6f42c1; color: white;">POQ - <?php echo htmlspecialchars($row['ID_PERHITUNGAN_KUANTITAS_POQ']); ?></span>
+                                                <span class="badge mt-1" style="background-color: #6f42c1; color: white;">POQ</span>
                                             <?php else: ?>
                                                 <span class="badge mt-1" style="background-color: #fd7e14; color: white;">Manual</span>
                                             <?php endif; ?>
@@ -764,10 +711,10 @@ $active_page = 'stock';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[11, 'asc'], [2, 'asc']], // Sort by Status (priority) then Waktu
+                order: [[13, 'asc'], [4, 'asc']], // Sort by Status (priority) then Waktu
                 columnDefs: [
-                    { orderable: false, targets: 12 }, // Disable sorting on Action column
-                    { type: 'num', targets: [11, 2] } // Status and Waktu columns use numeric sorting
+                    { orderable: false, targets: 14 }, // Disable sorting on Action column
+                    { type: 'num', targets: [13, 4] } // Status and Waktu columns use numeric sorting
                 ],
                 scrollX: true,
                 responsive: true,
@@ -810,7 +757,7 @@ $active_page = 'stock';
                 if (result.isConfirmed) {
                     // AJAX request untuk update status
                     $.ajax({
-                        url: 'riwayat_pembelian.php',
+                        url: 'riwayat_pembelian_gudang.php',
                         method: 'POST',
                         data: {
                             action: 'update_status',
@@ -1061,7 +1008,7 @@ $active_page = 'stock';
             }).then((result) => {
                 if (result.isConfirmed) {
                     $.ajax({
-                        url: 'riwayat_pembelian.php',
+                        url: 'riwayat_pembelian_gudang.php',
                         method: 'POST',
                         data: {
                             action: 'koreksi',

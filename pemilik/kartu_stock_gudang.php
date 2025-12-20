@@ -11,6 +11,51 @@ if (!isset($_SESSION['user_id']) || substr($_SESSION['user_id'], 0, 4) != 'OWNR'
 // Get parameter
 $kd_lokasi = isset($_GET['kd_lokasi']) ? trim($_GET['kd_lokasi']) : '';
 $kd_barang = isset($_GET['kd_barang']) ? trim($_GET['kd_barang']) : '';
+$id_pesan_batch = isset($_GET['id_pesan_batch']) ? trim($_GET['id_pesan_batch']) : '';
+
+// Handle AJAX request untuk get batch list
+if (isset($_GET['get_batch_list']) && $_GET['get_batch_list'] == '1') {
+    header('Content-Type: application/json');
+    
+    $kd_barang_ajax = isset($_GET['kd_barang']) ? trim($_GET['kd_barang']) : '';
+    
+    if (empty($kd_barang_ajax) || empty($kd_lokasi)) {
+        echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
+        exit();
+    }
+    
+    // Query untuk mendapatkan daftar batch untuk barang tertentu (semua batch, tidak hanya yang masih ada stock)
+    $query_batch = "SELECT 
+        pb.ID_PESAN_BARANG,
+        pb.TGL_EXPIRED,
+        pb.SISA_STOCK_DUS,
+        pb.WAKTU_SELESAI,
+        COALESCE(ms.KD_SUPPLIER, '-') as SUPPLIER_KD,
+        COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER
+    FROM PESAN_BARANG pb
+    LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
+    WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.STATUS = 'SELESAI'
+    ORDER BY pb.WAKTU_SELESAI DESC";
+    
+    $stmt_batch = $conn->prepare($query_batch);
+    $stmt_batch->bind_param("ss", $kd_barang_ajax, $kd_lokasi);
+    $stmt_batch->execute();
+    $result_batch = $stmt_batch->get_result();
+    
+    $batches = [];
+    while ($row = $result_batch->fetch_assoc()) {
+        $batches[] = [
+            'id_pesan_barang' => $row['ID_PESAN_BARANG'],
+            'tgl_expired' => $row['TGL_EXPIRED'],
+            'sisa_stock_dus' => $row['SISA_STOCK_DUS'],
+            'waktu_selesai' => $row['WAKTU_SELESAI'],
+            'supplier' => $row['NAMA_SUPPLIER']
+        ];
+    }
+    
+    echo json_encode(['success' => true, 'batches' => $batches]);
+    exit();
+}
 
 if (empty($kd_lokasi)) {
     header("Location: laporan.php");
@@ -164,16 +209,45 @@ if (!empty($kd_barang)) {
             sh.JUMLAH_PERUBAHAN,
             sh.JUMLAH_AKHIR,
             sh.SATUAN,
-            u.NAMA as NAMA_USER
+            u.NAMA as NAMA_USER,
+            -- Untuk TRANSFER: ambil ID_PESAN_BARANG dari DETAIL_TRANSFER_BARANG_BATCH
+            -- REF untuk TRANSFER dari gudang adalah ID_DETAIL_TRANSFER_BARANG_BATCH
+            -- REF untuk TRANSFER dari toko adalah ID_TRANSFER_BARANG
+            COALESCE(dtbb_direct.ID_PESAN_BARANG, dtbb_via_dtb.ID_PESAN_BARANG) as ID_PESAN_TRANSFER,
+            -- Untuk OPNAME: ambil REF_BATCH dari STOCK_OPNAME
+            so.REF_BATCH as REF_BATCH_OPNAME,
+            -- Untuk RUSAK: ambil REF dari MUTASI_BARANG_RUSAK (yang berisi ID_PESAN_BARANG)
+            mbr.REF as REF_RUSAK
         FROM STOCK_HISTORY sh
         LEFT JOIN USERS u ON sh.UPDATED_BY = u.ID_USERS
+        LEFT JOIN STOCK_OPNAME so ON sh.TIPE_PERUBAHAN = 'OPNAME' AND sh.REF = so.ID_OPNAME
+        LEFT JOIN MUTASI_BARANG_RUSAK mbr ON sh.TIPE_PERUBAHAN = 'RUSAK' AND sh.REF = mbr.ID_MUTASI_BARANG_RUSAK
+        -- Untuk TRANSFER dari gudang: REF adalah ID_DETAIL_TRANSFER_BARANG_BATCH
+        LEFT JOIN DETAIL_TRANSFER_BARANG_BATCH dtbb_direct ON sh.TIPE_PERUBAHAN = 'TRANSFER' AND sh.REF = dtbb_direct.ID_DETAIL_TRANSFER_BARANG_BATCH
+        -- Untuk TRANSFER dari toko: REF adalah ID_TRANSFER_BARANG, join melalui DETAIL_TRANSFER_BARANG
+        LEFT JOIN DETAIL_TRANSFER_BARANG dtb ON sh.TIPE_PERUBAHAN = 'TRANSFER' AND sh.REF = dtb.ID_TRANSFER_BARANG AND dtb.KD_BARANG = sh.KD_BARANG
+        LEFT JOIN DETAIL_TRANSFER_BARANG_BATCH dtbb_via_dtb ON dtb.ID_DETAIL_TRANSFER_BARANG = dtbb_via_dtb.ID_DETAIL_TRANSFER_BARANG
         WHERE sh.KD_BARANG = ? AND sh.KD_LOKASI = ?
-        AND sh.WAKTU_CHANGE >= ? AND sh.WAKTU_CHANGE < ?
-        ORDER BY sh.WAKTU_CHANGE DESC, sh.ID_HISTORY_STOCK DESC";
+        AND sh.WAKTU_CHANGE >= ? AND sh.WAKTU_CHANGE < ?";
+        
+        // Filter berdasarkan batch jika dipilih
+        if (!empty($id_pesan_batch)) {
+            $query_history .= " AND (
+                (sh.TIPE_PERUBAHAN IN ('PEMESANAN', 'KOREKSI') AND sh.REF = ?) OR
+                (sh.TIPE_PERUBAHAN = 'TRANSFER' AND COALESCE(dtbb_direct.ID_PESAN_BARANG, dtbb_via_dtb.ID_PESAN_BARANG) = ?) OR
+                (sh.TIPE_PERUBAHAN = 'RUSAK' AND mbr.REF = ?)
+            )";
+        }
+        
+        $query_history .= " ORDER BY sh.WAKTU_CHANGE DESC, sh.ID_HISTORY_STOCK DESC";
         
         $stmt_history = $conn->prepare($query_history);
         $tanggal_dari_datetime = $tanggal_dari . ' 00:00:00';
-        $stmt_history->bind_param("ssss", $kd_barang, $kd_lokasi, $tanggal_dari_datetime, $tanggal_sampai_end);
+        if (!empty($id_pesan_batch)) {
+            $stmt_history->bind_param("sssssss", $kd_barang, $kd_lokasi, $tanggal_dari_datetime, $tanggal_sampai_end, $id_pesan_batch, $id_pesan_batch, $id_pesan_batch);
+        } else {
+            $stmt_history->bind_param("ssss", $kd_barang, $kd_lokasi, $tanggal_dari_datetime, $tanggal_sampai_end);
+        }
         $stmt_history->execute();
         $result_history = $stmt_history->get_result();
         
@@ -192,13 +266,13 @@ function formatTanggal($tanggal) {
     return $date->format('d/m/Y');
 }
 
-// Format waktu (dd/mm/yyyy HH:ii WIB)
+// Format waktu (dd/mm/yyyy HH:ii:ss WIB)
 function formatWaktu($waktu) {
     if (empty($waktu) || $waktu == null) {
         return '-';
     }
     $date = new DateTime($waktu);
-    return $date->format('d/m/Y H:i') . ' WIB';
+    return $date->format('d/m/Y H:i:s') . ' WIB';
 }
 
 // Format tipe perubahan
@@ -208,7 +282,8 @@ function formatTipePerubahan($tipe) {
         'TRANSFER' => 'Transfer',
         'OPNAME' => 'Stock Opname',
         'RUSAK' => 'Mutasi Rusak',
-        'PENJUALAN' => 'Penjualan'
+        'PENJUALAN' => 'Penjualan',
+        'KOREKSI' => 'Koreksi'
     ];
     return $labels[$tipe] ?? $tipe;
 }
@@ -246,7 +321,7 @@ $active_page = 'laporan';
                 <h5 class="card-title mb-3">Filter Kartu Stock</h5>
                 <form method="GET" action="" class="row g-3">
                     <input type="hidden" name="kd_lokasi" value="<?php echo htmlspecialchars($kd_lokasi); ?>">
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <label class="form-label fw-bold">Pilih Barang</label>
                         <select class="form-select" name="kd_barang" id="selectBarang" required>
                             <option value="">-- Pilih Barang --</option>
@@ -264,19 +339,25 @@ $active_page = 'laporan';
                             <?php endif; ?>
                         </select>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-2" id="filterBatchContainer" style="display: none;">
+                        <label class="form-label fw-bold">Pilih Batch</label>
+                        <select class="form-select" name="id_pesan_batch" id="selectBatch">
+                            <option value="">-- Semua Batch --</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
                         <label class="form-label fw-bold">Tanggal Dari</label>
                         <input type="date" class="form-control" name="tanggal_dari" id="tanggal_dari" 
                                value="<?php echo !empty($tanggal_dari) ? htmlspecialchars($tanggal_dari) : ''; ?>" 
                                required>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <label class="form-label fw-bold">Tanggal Sampai</label>
                         <input type="date" class="form-control" name="tanggal_sampai" id="tanggal_sampai" 
                                value="<?php echo !empty($tanggal_sampai) ? htmlspecialchars($tanggal_sampai) : ''; ?>" 
                                required>
                     </div>
-                    <div class="col-md-3 d-flex align-items-end gap-2">
+                    <div class="col-md-4 d-flex align-items-end gap-2">
                         <button type="submit" class="btn btn-primary">Tampilkan</button>
                         <?php if (!empty($kd_barang)): ?>
                             <a href="download_kartu_stock_gudang.php?kd_lokasi=<?php echo urlencode($kd_lokasi); ?>&kd_barang=<?php echo urlencode($kd_barang); ?>&tanggal_dari=<?php echo urlencode($tanggal_dari); ?>&tanggal_sampai=<?php echo urlencode($tanggal_sampai); ?>" 
@@ -394,6 +475,7 @@ $active_page = 'laporan';
                                 <th>Tanggal/Waktu</th>
                                 <th>Tipe Perubahan</th>
                                 <th>Referensi</th>
+                                <th>Referensi Batch</th>
                                 <th>Jumlah Awal</th>
                                 <th>Masuk</th>
                                 <th>Keluar</th>
@@ -415,12 +497,38 @@ $active_page = 'laporan';
                                                 echo $h['TIPE_PERUBAHAN'] == 'PEMESANAN' ? 'bg-success' : 
                                                     ($h['TIPE_PERUBAHAN'] == 'TRANSFER' ? 'bg-info' : 
                                                     ($h['TIPE_PERUBAHAN'] == 'OPNAME' ? 'bg-warning' : 
-                                                    ($h['TIPE_PERUBAHAN'] == 'RUSAK' ? 'bg-danger' : 'bg-primary'))); 
+                                                    ($h['TIPE_PERUBAHAN'] == 'RUSAK' ? 'bg-danger' : 
+                                                    ($h['TIPE_PERUBAHAN'] == 'KOREKSI' ? 'bg-warning' : 'bg-primary')))); 
                                                 ?>">
                                                 <?php echo formatTipePerubahan($h['TIPE_PERUBAHAN']); ?>
                                             </span>
                                         </td>
-                                        <td><?php echo htmlspecialchars($h['REF'] ?? '-'); ?></td>
+                                        <td>
+                                            <?php 
+                                            // Kolom Referensi: ambil dari STOCK_HISTORY.REF
+                                            echo htmlspecialchars($h['REF'] ?? '-');
+                                            ?>
+                                        </td>
+                                        <td>
+                                            <?php 
+                                            // Kolom Referensi Batch: silangkan dengan tabel terkait
+                                            if (in_array($h['TIPE_PERUBAHAN'], ['PEMESANAN', 'KOREKSI']) && !empty($h['REF'])) {
+                                                // REF untuk PEMESANAN dan KOREKSI adalah ID_PESAN_BARANG
+                                                echo htmlspecialchars($h['REF']);
+                                            } elseif ($h['TIPE_PERUBAHAN'] == 'TRANSFER' && !empty($h['ID_PESAN_TRANSFER'])) {
+                                                // Untuk TRANSFER: ambil ID_PESAN_BARANG dari DETAIL_TRANSFER_BARANG_BATCH
+                                                echo htmlspecialchars($h['ID_PESAN_TRANSFER']);
+                                            } elseif ($h['TIPE_PERUBAHAN'] == 'OPNAME' && !empty($h['REF_BATCH_OPNAME'])) {
+                                                // Untuk OPNAME: ambil REF_BATCH dari STOCK_OPNAME
+                                                echo htmlspecialchars($h['REF_BATCH_OPNAME']);
+                                            } elseif ($h['TIPE_PERUBAHAN'] == 'RUSAK' && !empty($h['REF_RUSAK'])) {
+                                                // Untuk RUSAK: ambil REF dari MUTASI_BARANG_RUSAK (yang berisi ID_PESAN_BARANG)
+                                                echo htmlspecialchars($h['REF_RUSAK']);
+                                            } else {
+                                                echo '-';
+                                            }
+                                            ?>
+                                        </td>
                                         <td><?php echo number_format($h['JUMLAH_AWAL'], 0, ',', '.'); ?></td>
                                         <td class="text-success fw-bold">
                                             <?php echo $h['JUMLAH_PERUBAHAN'] > 0 ? number_format($h['JUMLAH_PERUBAHAN'], 0, ',', '.') : '-'; ?>
@@ -435,7 +543,7 @@ $active_page = 'laporan';
                                 <?php endforeach; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="9" class="text-center text-muted">Tidak ada pergerakan stock pada periode yang dipilih</td>
+                                    <td colspan="10" class="text-center text-muted">Tidak ada pergerakan stock pada periode yang dipilih</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
@@ -463,6 +571,60 @@ $active_page = 'laporan';
     
     <script>
         $(document).ready(function() {
+            const kdLokasi = '<?php echo htmlspecialchars($kd_lokasi, ENT_QUOTES); ?>';
+            const kdBarang = '<?php echo htmlspecialchars($kd_barang, ENT_QUOTES); ?>';
+            const idPesanBatch = '<?php echo htmlspecialchars($id_pesan_batch, ENT_QUOTES); ?>';
+            
+            // Function to load batch list
+            function loadBatchList(kdBarang) {
+                if (!kdBarang) {
+                    $('#filterBatchContainer').hide();
+                    $('#selectBatch').html('<option value="">-- Semua Batch --</option>');
+                    return;
+                }
+                
+                $.ajax({
+                    url: window.location.pathname,
+                    method: 'GET',
+                    data: {
+                        get_batch_list: '1',
+                        kd_barang: kdBarang,
+                        kd_lokasi: kdLokasi
+                    },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.success && response.batches) {
+                            let options = '<option value="">-- Semua Batch --</option>';
+                            response.batches.forEach(function(batch) {
+                                const selected = (idPesanBatch && batch.id_pesan_barang === idPesanBatch) ? 'selected' : '';
+                                const tglExpired = batch.tgl_expired ? new Date(batch.tgl_expired).toLocaleDateString('id-ID') : '-';
+                                const label = `ID: ${batch.id_pesan_barang} | Exp: ${tglExpired} | Sisa: ${batch.sisa_stock_dus} dus`;
+                                options += `<option value="${batch.id_pesan_barang}" ${selected}>${label}</option>`;
+                            });
+                            $('#selectBatch').html(options);
+                            $('#filterBatchContainer').show();
+                        } else {
+                            $('#filterBatchContainer').hide();
+                            $('#selectBatch').html('<option value="">-- Semua Batch --</option>');
+                        }
+                    },
+                    error: function() {
+                        $('#filterBatchContainer').hide();
+                        $('#selectBatch').html('<option value="">-- Semua Batch --</option>');
+                    }
+                });
+            }
+            
+            // Show/hide filter batch based on selected barang
+            if (kdBarang) {
+                loadBatchList(kdBarang);
+            }
+            
+            // Handle barang selection change
+            $('#selectBarang').on('change', function() {
+                const selectedKdBarang = $(this).val();
+                loadBatchList(selectedKdBarang);
+            });
             
             // Konversi dd/mm/yyyy ke yyyy-mm-dd saat submit
             $('form').on('submit', function(e) {

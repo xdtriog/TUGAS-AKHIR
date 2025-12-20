@@ -635,8 +635,8 @@ $active_page = 'barang_masuk';
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label fw-bold small">Tanggal Expired <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control form-control-sm" id="validasi_tgl_expired" name="tgl_expired" 
-                                       placeholder="dd/mm/yyyy" maxlength="10" required>
+                                <input type="date" class="form-control form-control-sm" id="validasi_tgl_expired" name="tgl_expired" 
+                                       min="<?php echo date('Y-m-d'); ?>" required>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label fw-bold small">Total Masuk (dus)</label>
@@ -727,7 +727,12 @@ $active_page = 'barang_masuk';
                         // Format rupiah untuk harga dan biaya pengiriman
                         $('#validasi_harga_pesan').val(formatRupiah(data.harga_pesan_dus || 0));
                         $('#validasi_biaya_pengiriman').val(formatRupiah(data.biaya_pengiriman || 0));
-                        $('#validasi_tgl_expired').val(data.tgl_expired);
+                        // Konversi dd/mm/yyyy ke YYYY-MM-DD untuk input type="date"
+                        if (data.tgl_expired) {
+                            $('#validasi_tgl_expired').val(convertDateToYMD(data.tgl_expired));
+                        } else {
+                            $('#validasi_tgl_expired').val('');
+                        }
                         
                         // Hitung total masuk
                         hitungTotalMasuk();
@@ -735,6 +740,15 @@ $active_page = 'barang_masuk';
                         // Buka modal
                         var modal = new bootstrap.Modal(document.getElementById('modalValidasi'));
                         modal.show();
+                        
+                        // Initialize Flatpickr setelah modal ditampilkan
+                        setTimeout(function() {
+                            initFlatpickrExpired();
+                            // Set tanggal jika sudah ada
+                            if (data.tgl_expired) {
+                                flatpickrExpired.setDate(data.tgl_expired, false, "d/m/Y");
+                            }
+                        }, 300);
                     } else {
                         Swal.fire({
                             icon: 'error',
@@ -772,60 +786,21 @@ $active_page = 'barang_masuk';
             hitungTotalMasuk();
         });
         
-        // Format tanggal expired (dd/mm/yyyy)
-        function formatTanggalExpired(input) {
-            var value = input.value.replace(/\D/g, ''); // Hapus semua non-digit
-            var formatted = '';
-            
-            if (value.length > 0) {
-                formatted = value.substring(0, 2); // Hari
+        // Konversi dd/mm/yyyy ke YYYY-MM-DD untuk input type="date"
+        function convertDateToYMD(dateString) {
+            if (!dateString) return '';
+            // Jika sudah format YYYY-MM-DD, return as is
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+                return dateString;
             }
-            if (value.length > 2) {
-                formatted += '/' + value.substring(2, 4); // Bulan
+            // Jika format dd/mm/yyyy, konversi
+            var parts = dateString.split('/');
+            if (parts.length === 3) {
+                return parts[2] + '-' + parts[1] + '-' + parts[0];
             }
-            if (value.length > 4) {
-                formatted += '/' + value.substring(4, 8); // Tahun
-            }
-            
-            input.value = formatted;
+            return dateString;
         }
         
-        // Event listener untuk format tanggal expired
-        $(document).on('input', '#validasi_tgl_expired', function() {
-            formatTanggalExpired(this);
-        });
-        
-        // Validasi format tanggal expired
-        function validateTanggalExpired(tanggal) {
-            var regex = /^(\d{2})\/(\d{2})\/(\d{4})$/;
-            if (!regex.test(tanggal)) {
-                return false;
-            }
-            
-            var parts = tanggal.split('/');
-            var day = parseInt(parts[0], 10);
-            var month = parseInt(parts[1], 10);
-            var year = parseInt(parts[2], 10);
-            
-            // Validasi range
-            if (month < 1 || month > 12) return false;
-            if (day < 1 || day > 31) return false;
-            if (year < 1900 || year > 2100) return false;
-            
-            // Validasi jumlah hari per bulan
-            var daysInMonth = new Date(year, month, 0).getDate();
-            if (day > daysInMonth) return false;
-            
-            return true;
-        }
-        
-        // Konversi dd/mm/yyyy ke YYYY-MM-DD
-        function convertTanggalToYMD(tanggal) {
-            if (!tanggal) return '';
-            var parts = tanggal.split('/');
-            if (parts.length !== 3) return '';
-            return parts[2] + '-' + parts[1] + '-' + parts[0];
-        }
         
         // Format rupiah untuk input harga dan biaya pengiriman
         function formatRupiah(angka) {
@@ -938,16 +913,6 @@ $active_page = 'barang_masuk';
                 });
                 return;
             }
-            
-            if (!validateTanggalExpired(tglExpired)) {
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Error Validasi!',
-                    text: 'Format tanggal expired tidak valid! Gunakan format dd/mm/yyyy (contoh: 31/12/2024)',
-                    confirmButtonColor: '#e74c3c'
-                });
-                return;
-            }
 
             // Ambil harga dan biaya pengiriman (hapus format rupiah)
             var hargaPesanDus = unformatRupiah($('#validasi_harga_pesan').val()) || 0;
@@ -1002,9 +967,8 @@ $active_page = 'barang_masuk';
             var hargaPesanDus = unformatRupiah($('#validasi_harga_pesan').val()) || 0;
             var biayaPengiriman = unformatRupiah($('#validasi_biaya_pengiriman').val()) || 0;
             
-            // Konversi tanggal expired dari dd/mm/yyyy ke YYYY-MM-DD
-            var tglExpired = $('#validasi_tgl_expired').val().trim();
-            var tglExpiredYMD = convertTanggalToYMD(tglExpired);
+            // Input type="date" sudah dalam format YYYY-MM-DD
+            var tglExpiredYMD = $('#validasi_tgl_expired').val().trim();
 
             // AJAX request untuk validasi
             $.ajax({

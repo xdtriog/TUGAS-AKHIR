@@ -70,10 +70,7 @@ $query_expired = "SELECT
     END as PRIORITAS_EXPIRED
 FROM PESAN_BARANG pb
 LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
-WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.STATUS = 'SELESAI' AND pb.SISA_STOCK_DUS > 0
-ORDER BY 
-    PRIORITAS_EXPIRED ASC,
-    COALESCE(pb.TGL_EXPIRED, '9999-12-31') ASC";
+WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.STATUS = 'SELESAI' AND pb.SISA_STOCK_DUS > 0";
 $stmt_expired = $conn->prepare($query_expired);
 $stmt_expired->bind_param("ss", $kd_barang, $kd_lokasi);
 $stmt_expired->execute();
@@ -217,15 +214,41 @@ $active_page = 'stock';
                                     $supplier_display = '-';
                                 }
                                 ?>
+                                <?php
+                                // Hitung nilai untuk sorting - expired paling dekat di atas, expired paling lama di bawah
+                                $prioritas_sort = $row['PRIORITAS_EXPIRED'];
+                                $tgl_expired_for_sort = $row['TGL_EXPIRED'];
+                                
+                                // Untuk sorting: yang belum expired (2,3,4) di atas, yang sudah expired (1) di bawah
+                                $sort_prioritas = ($prioritas_sort == 1) ? 2 : 1;
+                                
+                                // Hitung nilai sorting untuk tanggal expired
+                                if (empty($tgl_expired_for_sort)) {
+                                    // Tidak ada expired date: letakkan di bawah
+                                    $tgl_sort_value = ($prioritas_sort == 1) ? 0 : 9999999999;
+                                } else {
+                                    $tgl_timestamp = strtotime($tgl_expired_for_sort);
+                                    if ($prioritas_sort == 1) {
+                                        // Yang sudah expired: gunakan nilai terbalik (yang paling lama expired = nilai kecil = di bawah)
+                                        $tgl_sort_value = $tgl_timestamp > 0 ? (9999999999 - $tgl_timestamp) : 0;
+                                    } else {
+                                        // Yang belum expired: gunakan timestamp normal (yang paling dekat expired = nilai kecil = di atas)
+                                        $tgl_sort_value = $tgl_timestamp > 0 ? $tgl_timestamp : 9999999999;
+                                    }
+                                }
+                                
+                                // Gabungkan prioritas dan tanggal untuk sorting (prioritas lebih penting)
+                                $combined_sort_value = $sort_prioritas * 10000000000 + $tgl_sort_value;
+                                ?>
                                 <tr>
                                     <td><?php echo htmlspecialchars($row['ID_PESAN_BARANG']); ?></td>
                                     <td><?php echo $supplier_display; ?></td>
-                                    <td><?php echo formatTanggal($row['TGL_EXPIRED']); ?></td>
+                                    <td data-order="<?php echo $combined_sort_value; ?>"><?php echo formatTanggal($row['TGL_EXPIRED']); ?></td>
                                     <td><?php echo number_format($row['SISA_STOCK_DUS'], 0, ',', '.'); ?></td>
                                     <td><?php echo number_format($row['TOTAL_MASUK_DUS'], 0, ',', '.'); ?></td>
                                     <td><?php echo formatRupiah($row['HARGA_PESAN_BARANG_DUS']); ?></td>
                                     <td><?php echo formatTanggalWaktu($row['WAKTU_SELESAI']); ?></td>
-                                    <td>
+                                    <td data-order="<?php echo $combined_sort_value; ?>">
                                         <span class="badge bg-<?php echo $badge_class; ?>"><?php echo $status_expired; ?></span>
                                     </td>
                                 </tr>
@@ -262,7 +285,17 @@ $active_page = 'stock';
                 },
                 pageLength: 10,
                 lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "Semua"]],
-                order: [[2, 'asc']], // Sort by Tanggal Expired ascending
+                order: [[2, 'asc']], // Sort by Tanggal Expired (expired paling dekat di atas, expired paling lama di bawah)
+                columnDefs: [
+                    {
+                        type: 'num',
+                        targets: [2, 7] // Kolom Tanggal Expired dan Status Expired (menggunakan data-order)
+                    },
+                    {
+                        orderable: true,
+                        targets: '_all'
+                    }
+                ],
                 scrollX: true,
                 autoWidth: false
             }).on('error.dt', function(e, settings, techNote, message) {

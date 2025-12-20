@@ -192,13 +192,13 @@ function formatTanggal($tanggal) {
     return $date->format('d/m/Y');
 }
 
-// Format waktu (dd/mm/yyyy HH:ii WIB)
+// Format waktu (dd/mm/yyyy HH:ii:ss WIB)
 function formatWaktu($waktu) {
     if (empty($waktu) || $waktu == null) {
         return '-';
     }
     $date = new DateTime($waktu);
-    return $date->format('d/m/Y H:i') . ' WIB';
+    return $date->format('d/m/Y H:i:s') . ' WIB';
 }
 
 // Format tipe perubahan

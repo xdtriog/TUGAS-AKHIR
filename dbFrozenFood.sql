@@ -250,7 +250,7 @@ CREATE TABLE STOCK_HISTORY (
          JUMLAH_AWAL            INT,
          JUMLAH_PERUBAHAN       INT,
          JUMLAH_AKHIR           INT,
-         TIPE_PERUBAHAN         ENUM('PEMESANAN', 'TRANSFER', 'OPNAME', 'RUSAK', 'PENJUALAN'),
+         TIPE_PERUBAHAN         ENUM('PEMESANAN', 'TRANSFER', 'OPNAME', 'RUSAK', 'PENJUALAN', 'KOREKSI'),
          REF                    VARCHAR(16),
          SATUAN                 ENUM('PIECES', 'DUS'),
          WAKTU_CHANGE           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

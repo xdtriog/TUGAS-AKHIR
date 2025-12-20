@@ -69,7 +69,11 @@ $active_page = 'stock';
                                     <td><?php echo htmlspecialchars($row['NAMA_LOKASI']); ?></td>
                                     <td><?php echo htmlspecialchars($row['ALAMAT_LOKASI']); ?></td>
                                     <td>
-                                        <button class="btn-view" onclick="lihatStock('<?php echo htmlspecialchars($row['KD_LOKASI']); ?>', 'gudang')">Lihat</button>
+                                        <div class="d-flex flex-wrap gap-1">
+                                            <button class="btn-view" onclick="lihatStock('<?php echo htmlspecialchars($row['KD_LOKASI']); ?>', 'gudang')">Lihat</button>
+                                            <button class="btn-view" onclick="lihatRiwayatPembelian('<?php echo htmlspecialchars($row['KD_LOKASI']); ?>')">Lihat Riwayat Pembelian</button>
+                                            <button class="btn-view" onclick="lihatRiwayatResupplyGudang('<?php echo htmlspecialchars($row['KD_LOKASI']); ?>')">Lihat Riwayat Resupply</button>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endwhile; ?>
@@ -100,7 +104,10 @@ $active_page = 'stock';
                                     <td><?php echo htmlspecialchars($row['NAMA_LOKASI']); ?></td>
                                     <td><?php echo htmlspecialchars($row['ALAMAT_LOKASI']); ?></td>
                                     <td>
-                                        <button class="btn-view" onclick="lihatStock('<?php echo htmlspecialchars($row['KD_LOKASI']); ?>', 'toko')">Lihat</button>
+                                        <div class="d-flex flex-wrap gap-1">
+                                            <button class="btn-view" onclick="lihatStock('<?php echo htmlspecialchars($row['KD_LOKASI']); ?>', 'toko')">Lihat</button>
+                                            <button class="btn-view" onclick="lihatRiwayatResupplyToko('<?php echo htmlspecialchars($row['KD_LOKASI']); ?>')">Lihat Riwayat Resupply</button>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endwhile; ?>
@@ -182,6 +189,18 @@ $active_page = 'stock';
             } else {
                 window.location.href = 'stock_detail_toko.php?kd_lokasi=' + encodeURIComponent(kodeLokasi) + '&type=' + encodeURIComponent(type);
             }
+        }
+
+        function lihatRiwayatPembelian(kodeLokasi) {
+            window.location.href = 'riwayat_pembelian_gudang.php?kd_lokasi=' + encodeURIComponent(kodeLokasi);
+        }
+
+        function lihatRiwayatResupplyGudang(kodeLokasi) {
+            window.location.href = 'riwayat_resupply_gudang.php?kd_lokasi=' + encodeURIComponent(kodeLokasi);
+        }
+
+        function lihatRiwayatResupplyToko(kodeLokasi) {
+            window.location.href = 'riwayat_resupply_toko.php?kd_lokasi=' + encodeURIComponent(kodeLokasi);
         }
     </script>
 </body>

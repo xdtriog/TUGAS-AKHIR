@@ -356,7 +356,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                 throw new Exception('Gagal prepare query insert history: ' . $conn->error);
             }
             $satuan_history = 'DUS';
-            $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_sistem_batch_dus, $selisih_dus, $jumlah_sebenarnya_dus, $id_pesan_barang, $satuan_history);
+            // REF di STOCK_HISTORY untuk OPNAME adalah ID_OPNAME (bukan ID_PESAN_BARANG)
+            $stmt_history->bind_param("ssssiiiss", $id_history, $kd_barang, $kd_lokasi, $user_id, $jumlah_sistem_batch_dus, $selisih_dus, $jumlah_sebenarnya_dus, $id_opname, $satuan_history);
             if (!$stmt_history->execute()) {
                 throw new Exception('Gagal insert history: ' . $stmt_history->error);
             }

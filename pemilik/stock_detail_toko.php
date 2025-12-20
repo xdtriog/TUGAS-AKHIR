@@ -130,6 +130,7 @@ if (isset($_GET['get_batch_expired']) && $_GET['get_batch_expired'] == '1') {
     
     // Query untuk mendapatkan batch expired (per ID_PESAN_BARANG dan TGL_EXPIRED)
     // Hanya ambil yang STATUS = 'SELESAI' dan SISA_STOCK_DUS > 0
+    // Jangan tampilkan batch yang sudah expired (TGL_EXPIRED < CURDATE())
     // Sort dari expired date terdekat
     $query_batch = "SELECT 
         pb.ID_PESAN_BARANG,
@@ -140,13 +141,13 @@ if (isset($_GET['get_batch_expired']) && $_GET['get_batch_expired'] == '1') {
     FROM PESAN_BARANG pb
     LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
     WHERE pb.KD_BARANG = ? AND pb.KD_LOKASI = ? AND pb.STATUS = 'SELESAI' AND pb.SISA_STOCK_DUS > 0
+    AND (pb.TGL_EXPIRED IS NULL OR pb.TGL_EXPIRED >= CURDATE())
     ORDER BY 
         CASE 
             WHEN pb.TGL_EXPIRED IS NULL THEN 999
-            WHEN pb.TGL_EXPIRED < CURDATE() THEN 1
-            WHEN pb.TGL_EXPIRED = CURDATE() THEN 2
-            WHEN pb.TGL_EXPIRED <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 3
-            ELSE 4
+            WHEN pb.TGL_EXPIRED = CURDATE() THEN 1
+            WHEN pb.TGL_EXPIRED <= DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 2
+            ELSE 3
         END ASC,
         COALESCE(pb.TGL_EXPIRED, '9999-12-31') ASC";
     $stmt_batch = $conn->prepare($query_batch);
@@ -1545,6 +1546,24 @@ $active_page = 'stock';
                 return;
             }
             
+            // Filter batch: hanya ambil yang belum expired (TGL_EXPIRED >= hari ini atau NULL)
+            var today = new Date();
+            today.setHours(0, 0, 0, 0); // Set ke awal hari untuk perbandingan yang akurat
+            
+            batches = batches.filter(function(batch) {
+                // Jika TGL_EXPIRED null, anggap belum expired
+                if (!batch.tgl_expired) {
+                    return true;
+                }
+                
+                // Cek apakah batch sudah expired
+                var batchExpiredDate = new Date(batch.tgl_expired);
+                batchExpiredDate.setHours(0, 0, 0, 0);
+                
+                // Hanya ambil batch yang belum expired (TGL_EXPIRED >= hari ini)
+                return batchExpiredDate >= today;
+            });
+            
             // Sort batch berdasarkan expired date (terdekat dulu)
             batches.sort(function(a, b) {
                 // Batch dengan expired date null atau kosong dianggap paling akhir
@@ -1572,6 +1591,15 @@ $active_page = 'stock';
                 
                 if (sisaStockBatch <= 0) {
                     continue; // Skip batch yang tidak ada stock
+                }
+                
+                // Skip batch yang sudah expired (double check untuk safety)
+                if (batch.tgl_expired) {
+                    var batchExpiredDate = new Date(batch.tgl_expired);
+                    batchExpiredDate.setHours(0, 0, 0, 0);
+                    if (batchExpiredDate < today) {
+                        continue; // Skip batch yang sudah expired
+                    }
                 }
                 
                 // Hitung berapa yang akan diambil dari batch ini
