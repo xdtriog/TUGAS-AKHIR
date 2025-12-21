@@ -208,7 +208,8 @@ function formatTipePerubahan($tipe) {
         'TRANSFER' => 'Transfer',
         'OPNAME' => 'Stock Opname',
         'RUSAK' => 'Mutasi Rusak',
-        'PENJUALAN' => 'Penjualan'
+        'PENJUALAN' => 'Penjualan',
+        'KOREKSI' => 'Koreksi'
     ];
     return $labels[$tipe] ?? $tipe;
 }
@@ -415,8 +416,10 @@ $active_page = 'laporan';
                                                 echo $h['TIPE_PERUBAHAN'] == 'PEMESANAN' ? 'bg-success' : 
                                                     ($h['TIPE_PERUBAHAN'] == 'TRANSFER' ? 'bg-info' : 
                                                     ($h['TIPE_PERUBAHAN'] == 'OPNAME' ? 'bg-warning' : 
-                                                    ($h['TIPE_PERUBAHAN'] == 'RUSAK' ? 'bg-danger' : 'bg-primary'))); 
-                                                ?>">
+                                                    ($h['TIPE_PERUBAHAN'] == 'RUSAK' ? 'bg-danger' : 
+                                                    ($h['TIPE_PERUBAHAN'] == 'KOREKSI' ? 'bg-warning' : 'bg-primary')))); 
+                                                ?>" 
+                                                style="<?php echo $h['TIPE_PERUBAHAN'] == 'KOREKSI' ? 'background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%) !important;' : ''; ?>">
                                                 <?php echo formatTipePerubahan($h['TIPE_PERUBAHAN']); ?>
                                             </span>
                                         </td>

@@ -279,19 +279,19 @@ $active_page = 'laporan';
                                     <td><?php echo formatTanggalExpired($row['TGL_EXPIRED'] ?? null); ?></td>
                                     <td><?php echo htmlspecialchars($row['NAMA_SUPPLIER']); ?></td>
                                     <td>
-                                        <span class="text-danger fw-bold">
-                                            <?php echo number_format($row['JUMLAH_MUTASI_DUS'], 0, ',', '.'); ?>
+                                        <span class="<?php echo $row['JUMLAH_MUTASI_DUS'] < 0 ? 'text-danger' : ($row['JUMLAH_MUTASI_DUS'] > 0 ? 'text-success' : 'text-muted'); ?> fw-bold">
+                                            <?php echo ($row['JUMLAH_MUTASI_DUS'] > 0 ? '+' : '') . number_format($row['JUMLAH_MUTASI_DUS'], 0, ',', '.'); ?>
                                         </span>
                                     </td>
                                     <td><?php echo number_format($row['SATUAN_PERDUS'], 0, ',', '.'); ?></td>
                                     <td>
-                                        <span class="text-danger fw-bold">
-                                            <?php echo number_format($row['TOTAL_BARANG_PIECES'], 0, ',', '.'); ?>
+                                        <span class="<?php echo $row['TOTAL_BARANG_PIECES'] < 0 ? 'text-danger' : ($row['TOTAL_BARANG_PIECES'] > 0 ? 'text-success' : 'text-muted'); ?> fw-bold">
+                                            <?php echo ($row['TOTAL_BARANG_PIECES'] > 0 ? '+' : '') . number_format($row['TOTAL_BARANG_PIECES'], 0, ',', '.'); ?>
                                         </span>
                                     </td>
                                     <td><?php echo formatRupiah($row['HARGA_BARANG_PIECES']); ?></td>
                                     <td>
-                                        <span class="text-danger fw-bold">
+                                        <span class="<?php echo $row['TOTAL_UANG'] < 0 ? 'text-danger' : ($row['TOTAL_UANG'] > 0 ? 'text-success' : 'text-muted'); ?> fw-bold">
                                             <?php echo formatRupiah($row['TOTAL_UANG']); ?>
                                         </span>
                                     </td>

@@ -81,19 +81,19 @@ $active_page = 'dashboard';
             <div class="col-md-4">
                 <div class="stat-card primary">
                     <div class="stat-value"><?php echo number_format($total_barang_hari_ini, 0, ',', '.'); ?></div>
-                    <div class="stat-label">Barang terjual hari ini</div>
+                    <div class="stat-label">Kuantitas Penjualan Hari ini</div>
                 </div>
             </div>
             <div class="col-md-4">
                 <div class="stat-card info">
                     <div class="stat-value"><?php echo number_format($total_barang_bulan_ini, 0, ',', '.'); ?></div>
-                    <div class="stat-label">Barang terjual bulan ini</div>
+                    <div class="stat-label">Kuantitas Penjualan Bulan ini</div>
                 </div>
             </div>
             <div class="col-md-4">
                 <div class="stat-card success">
                     <div class="stat-value"><?php echo formatRupiah($gross_profit); ?></div>
-                    <div class="stat-label">Gross Profit Bulan ini</div>
+                    <div class="stat-label">Laba Kotor Bulan ini</div>
                 </div>
             </div>
         </div>

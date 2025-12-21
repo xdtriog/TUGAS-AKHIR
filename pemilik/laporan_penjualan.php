@@ -282,37 +282,37 @@ $active_page = 'laporan';
             <div class="col-md-2">
                 <div class="stat-card primary">
                     <div class="stat-value"><?php echo number_format($summary['TOTAL_TRANSAKSI'], 0, ',', '.'); ?></div>
-                    <div class="stat-label">Total Transaksi</div>
+                    <div class="stat-label">Volume Transaksi</div>
                 </div>
             </div>
             <div class="col-md-2">
                 <div class="stat-card info">
                     <div class="stat-value"><?php echo number_format($summary['TOTAL_BARANG_TERJUAL'], 0, ',', '.'); ?></div>
-                    <div class="stat-label">Total Barang Terjual</div>
+                    <div class="stat-label">Kuantitas Penjualan</div>
                 </div>
             </div>
             <div class="col-md-2">
                 <div class="stat-card success">
                     <div class="stat-value"><?php echo formatRupiah($summary['TOTAL_PENJUALAN']); ?></div>
-                    <div class="stat-label">Sub Total Jual</div>
+                    <div class="stat-label">Pendapatan Penjualan</div>
                 </div>
             </div>
             <div class="col-md-2">
                 <div class="stat-card danger">
                     <div class="stat-value"><?php echo formatRupiah($summary['TOTAL_BELI']); ?></div>
-                    <div class="stat-label">Sub Total Beli</div>
+                    <div class="stat-label">Beban Pokok Penjualan</div>
                 </div>
             </div>
             <div class="col-md-2">
-                <div class="stat-card" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white;">
-                    <div class="stat-value"><?php echo formatRupiah($summary['TOTAL_GROSS_PROFIT']); ?></div>
-                    <div class="stat-label">Gross Profit</div>
+                <div class="stat-card">
+                    <div class="stat-value" style="color: #28a745; font-weight: bold;"><?php echo formatRupiah($summary['TOTAL_GROSS_PROFIT']); ?></div>
+                    <div class="stat-label">Laba Kotor</div>
                 </div>
             </div>
             <div class="col-md-2">
                 <div class="stat-card warning">
                     <div class="stat-value"><?php echo formatRupiah($summary['TOTAL_GRAND_TOTAL']); ?></div>
-                    <div class="stat-label">Grand Total (Termasuk Pajak)</div>
+                    <div class="stat-label">Penerimaan Kas Bruto (Termasuk Pajak)</div>
                 </div>
             </div>
         </div>
@@ -327,11 +327,11 @@ $active_page = 'laporan';
                             <th>ID Nota Jual</th>
                             <th>Kasir</th>
                             <th>Jumlah Barang</th>
-                            <th>Sub Total Jual</th>
-                            <th>Sub Total Beli</th>
-                            <th>Gross Profit</th>
+                            <th>Pendapatan Penjualan</th>
+                            <th>Beban Pokok Penjualan</th>
+                            <th>Laba Kotor</th>
                             <th>Pajak</th>
-                            <th>Grand Total</th>
+                            <th>Penerimaan Kas Bruto</th>
                             <th>Action</th>
                         </tr>
                     </thead>
@@ -380,13 +380,13 @@ $active_page = 'laporan';
     
     <!-- Modal Lihat Nota -->
     <div class="modal fade" id="modalLihatNota" tabindex="-1" aria-labelledby="modalLihatNotaLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog" style="max-width: 500px;">
             <div class="modal-content">
                 <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
                     <h5 class="modal-title" id="modalLihatNotaLabel">Detail Nota Jual</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="modal-body" id="notaContent">
+                <div class="modal-body" id="notaContent" style="font-family: 'Courier New', monospace; padding: 15px;">
                     <div class="text-center">
                         <div class="spinner-border text-primary" role="status">
                             <span class="visually-hidden">Loading...</span>
@@ -399,6 +399,114 @@ $active_page = 'laporan';
             </div>
         </div>
     </div>
+    
+    <style>
+        #notaContent {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+        
+        #notaContent .nota-container {
+            background: white;
+            padding: 15px;
+            border: 1px solid #ddd;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+        
+        #notaContent .header {
+            text-align: center;
+            margin-bottom: 15px;
+            border-bottom: 1px dashed #000;
+            padding-bottom: 10px;
+        }
+        
+        #notaContent .header h3 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        #notaContent .header h4 {
+            margin: 5px 0;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        #notaContent .header p {
+            margin: 3px 0;
+            font-size: 11px;
+        }
+        
+        #notaContent .info-section {
+            margin-bottom: 10px;
+            font-size: 11px;
+        }
+        
+        #notaContent .info-section .row {
+            margin-bottom: 3px;
+        }
+        
+        #notaContent .info-section strong {
+            display: inline-block;
+            width: 80px;
+        }
+        
+        #notaContent table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+            font-size: 11px;
+            table-layout: fixed;
+        }
+        
+        #notaContent table th, #notaContent table td {
+            padding: 4px 2px;
+            text-align: left;
+            word-wrap: break-word;
+        }
+        
+        #notaContent table th {
+            border-bottom: 1px solid #000;
+            font-weight: bold;
+        }
+        
+        #notaContent table td.text-center {
+            text-align: center;
+        }
+        
+        #notaContent table td.text-right {
+            text-align: right;
+        }
+        
+        #notaContent .summary {
+            margin-top: 10px;
+            font-size: 11px;
+        }
+        
+        #notaContent .summary .row {
+            margin-bottom: 3px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        #notaContent .summary .total {
+            border-top: 1px solid #000;
+            padding-top: 5px;
+            margin-top: 5px;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        
+        #notaContent .footer {
+            text-align: center;
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px dashed #000;
+            font-size: 10px;
+            color: #666;
+        }
+    </style>
     
     <script>
         $(document).ready(function() {
@@ -459,45 +567,42 @@ $active_page = 'laporan';
                         var nota = response.nota;
                         var items = response.items;
                         
-                        // Build HTML nota
-                        var html = '<div class="nota-container" style="font-family: Arial, sans-serif;">';
-                        html += '<div class="text-center mb-4">';
-                        html += '<h4 class="mb-1">NOTA PENJUALAN</h4>';
-                        html += '<h5 class="mb-1">CV. KHARISMA WIJAYA ABADI KUSUMA</h5>';
-                        html += '<p class="mb-0 text-muted">' + escapeHtml(nota.alamat_lokasi) + '</p>';
+                        // Build HTML nota (menggunakan styling dari cetak_nota.php)
+                        var html = '<div class="nota-container">';
+                        html += '<div class="header">';
+                        html += '<h3>CV. KHARISMA WIJAYA</h3>';
+                        html += '<h4>ABADI KUSUMA</h4>';
+                        html += '<p>' + escapeHtml(nota.alamat_lokasi) + '</p>';
+                        html += '<p>Telp: 0813653985</p>';
                         html += '</div>';
                         
-                        html += '<hr>';
-                        
-                        html += '<div class="mb-3">';
-                        html += '<div class="row mb-2">';
-                        html += '<div class="col-4"><strong>ID Nota:</strong></div>';
-                        html += '<div class="col-8">' + escapeHtml(nota.id_nota_jual) + '</div>';
-                        html += '</div>';
-                        html += '<div class="row mb-2">';
-                        html += '<div class="col-4"><strong>Tanggal:</strong></div>';
-                        html += '<div class="col-8">' + escapeHtml(nota.waktu_nota) + '</div>';
-                        html += '</div>';
-                        html += '<div class="row mb-2">';
-                        html += '<div class="col-4"><strong>Kasir:</strong></div>';
-                        html += '<div class="col-8">' + escapeHtml(nota.nama_user) + '</div>';
+                        html += '<div class="info-section">';
+                        html += '<div class="row">';
+                        html += '<strong>ID Nota:</strong>';
+                        html += '<span>' + escapeHtml(nota.id_nota_jual) + '</span>';
                         html += '</div>';
                         html += '<div class="row">';
-                        html += '<div class="col-4"><strong>Toko:</strong></div>';
-                        html += '<div class="col-8">' + escapeHtml(nota.nama_lokasi) + '</div>';
+                        html += '<strong>Tanggal:</strong>';
+                        html += '<span>' + escapeHtml(nota.waktu_nota) + '</span>';
+                        html += '</div>';
+                        html += '<div class="row">';
+                        html += '<strong>Kasir:</strong>';
+                        html += '<span>' + escapeHtml(nota.nama_user) + '</span>';
+                        html += '</div>';
+                        html += '<div class="row">';
+                        html += '<strong>Toko:</strong>';
+                        html += '<span>' + escapeHtml(nota.nama_lokasi) + '</span>';
                         html += '</div>';
                         html += '</div>';
                         
-                        html += '<hr>';
-                        
-                        html += '<table class="table table-bordered mb-3" style="font-size: 0.9em;">';
-                        html += '<thead class="table-light">';
+                        html += '<table>';
+                        html += '<thead>';
                         html += '<tr>';
                         html += '<th style="width: 5%;">No</th>';
-                        html += '<th style="width: 40%;">Nama Barang</th>';
-                        html += '<th style="width: 10%;" class="text-center">Jumlah</th>';
-                        html += '<th style="width: 20%;" class="text-end">Harga</th>';
-                        html += '<th style="width: 25%;" class="text-end">Subtotal</th>';
+                        html += '<th style="width: 40%;">Barang</th>';
+                        html += '<th style="width: 10%;" class="text-center">Qty</th>';
+                        html += '<th style="width: 20%;" class="text-right">Harga</th>';
+                        html += '<th style="width: 25%;" class="text-right">Subtotal</th>';
                         html += '</tr>';
                         html += '</thead>';
                         html += '<tbody>';
@@ -507,48 +612,45 @@ $active_page = 'laporan';
                             html += '<td>' + (index + 1) + '</td>';
                             html += '<td>' + escapeHtml(item.nama_barang) + '</td>';
                             html += '<td class="text-center">' + numberFormat(item.jumlah) + '</td>';
-                            html += '<td class="text-end">' + formatRupiah(item.harga_jual) + '</td>';
-                            html += '<td class="text-end">' + formatRupiah(item.total_jual_uang) + '</td>';
+                            html += '<td class="text-right">' + formatRupiah(item.harga_jual) + '</td>';
+                            html += '<td class="text-right">' + formatRupiah(item.total_jual_uang) + '</td>';
                             html += '</tr>';
                         });
                         
                         html += '</tbody>';
                         html += '</table>';
                         
-                        html += '<div class="text-end mb-3" style="font-size: 0.95em;">';
-                        html += '<div class="row mb-2">';
-                        html += '<div class="col-6 text-start">Sub Total:</div>';
-                        html += '<div class="col-6 text-end">' + formatRupiah(nota.sub_total_jual) + '</div>';
+                        html += '<div class="summary">';
+                        html += '<div class="row">';
+                        html += '<span>Sub Total:</span>';
+                        html += '<span>' + formatRupiah(nota.sub_total_jual) + '</span>';
                         html += '</div>';
-                        html += '<div class="row mb-2">';
-                        html += '<div class="col-6 text-start">Pajak (11%):</div>';
-                        html += '<div class="col-6 text-end">' + formatRupiah(nota.pajak) + '</div>';
+                        html += '<div class="row">';
+                        html += '<span>Pajak (11%):</span>';
+                        html += '<span>' + formatRupiah(nota.pajak) + '</span>';
                         html += '</div>';
-                        html += '<div class="row" style="border-top: 2px solid #000; padding-top: 8px; margin-top: 8px;">';
-                        html += '<div class="col-6 text-start"><strong>Grand Total:</strong></div>';
-                        html += '<div class="col-6 text-end"><strong style="font-size: 1.3em;">' + formatRupiah(nota.grand_total) + '</strong></div>';
+                        html += '<div class="row total">';
+                        html += '<span>GRAND TOTAL:</span>';
+                        html += '<span>' + formatRupiah(nota.grand_total) + '</span>';
                         html += '</div>';
                         html += '</div>';
                         
                         // Tambahkan informasi internal (untuk admin) di bagian bawah
-                        html += '<hr style="border-top: 1px dashed #ccc; margin: 15px 0;">';
-                        html += '<div class="text-start mb-2" style="font-size: 0.85em; color: #666;">';
-                        html += '<div class="row mb-1">';
-                        html += '<div class="col-6"><strong>Info Internal:</strong></div>';
-                        html += '</div>';
-                        html += '<div class="row mb-1">';
-                        html += '<div class="col-6">Sub Total Beli:</div>';
-                        html += '<div class="col-6 text-end">' + formatRupiah(nota.sub_total_beli) + '</div>';
+                        html += '<div style="margin-top: 15px; padding-top: 10px; border-top: 1px dashed #ccc; font-size: 10px; color: #666;">';
+                        html += '<div style="margin-bottom: 5px;"><strong>Info Internal:</strong></div>';
+                        html += '<div class="row">';
+                        html += '<span>Beban Pokok Penjualan:</span>';
+                        html += '<span>' + formatRupiah(nota.sub_total_beli) + '</span>';
                         html += '</div>';
                         html += '<div class="row">';
-                        html += '<div class="col-6">Gross Profit:</div>';
-                        html += '<div class="col-6 text-end" style="color: #28a745; font-weight: bold;">' + formatRupiah(nota.gross_profit) + '</div>';
+                        html += '<span>Laba Kotor:</span>';
+                        html += '<span style="color: #28a745; font-weight: bold;">' + formatRupiah(nota.gross_profit) + '</span>';
                         html += '</div>';
                         html += '</div>';
                         
-                        html += '<hr>';
-                        html += '<div class="text-center text-muted mt-3">';
-                        html += '<small>Terima kasih atas kunjungan Anda</small>';
+                        html += '<div class="footer">';
+                        html += '<p>Terima kasih atas kunjungan Anda</p>';
+                        html += '<p>Barang yang sudah dibeli tidak dapat ditukar/dikembalikan</p>';
                         html += '</div>';
                         html += '</div>';
                         

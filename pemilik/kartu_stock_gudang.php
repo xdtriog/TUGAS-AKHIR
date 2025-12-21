@@ -217,7 +217,9 @@ if (!empty($kd_barang)) {
             -- Untuk OPNAME: ambil REF_BATCH dari STOCK_OPNAME
             so.REF_BATCH as REF_BATCH_OPNAME,
             -- Untuk RUSAK: ambil REF dari MUTASI_BARANG_RUSAK (yang berisi ID_PESAN_BARANG)
-            mbr.REF as REF_RUSAK
+            mbr.REF as REF_RUSAK,
+            -- Untuk KOREKSI: ambil ID_PESAN_BARANG dari DETAIL_TRANSFER_BARANG_BATCH (REF adalah ID_DETAIL_TRANSFER_BARANG_BATCH)
+            dtbb_koreksi.ID_PESAN_BARANG as ID_PESAN_KOREKSI
         FROM STOCK_HISTORY sh
         LEFT JOIN USERS u ON sh.UPDATED_BY = u.ID_USERS
         LEFT JOIN STOCK_OPNAME so ON sh.TIPE_PERUBAHAN = 'OPNAME' AND sh.REF = so.ID_OPNAME
@@ -227,6 +229,8 @@ if (!empty($kd_barang)) {
         -- Untuk TRANSFER dari toko: REF adalah ID_TRANSFER_BARANG, join melalui DETAIL_TRANSFER_BARANG
         LEFT JOIN DETAIL_TRANSFER_BARANG dtb ON sh.TIPE_PERUBAHAN = 'TRANSFER' AND sh.REF = dtb.ID_TRANSFER_BARANG AND dtb.KD_BARANG = sh.KD_BARANG
         LEFT JOIN DETAIL_TRANSFER_BARANG_BATCH dtbb_via_dtb ON dtb.ID_DETAIL_TRANSFER_BARANG = dtbb_via_dtb.ID_DETAIL_TRANSFER_BARANG
+        -- Untuk KOREKSI: REF adalah ID_DETAIL_TRANSFER_BARANG_BATCH, ambil ID_PESAN_BARANG
+        LEFT JOIN DETAIL_TRANSFER_BARANG_BATCH dtbb_koreksi ON sh.TIPE_PERUBAHAN = 'KOREKSI' AND sh.REF = dtbb_koreksi.ID_DETAIL_TRANSFER_BARANG_BATCH
         WHERE sh.KD_BARANG = ? AND sh.KD_LOKASI = ?
         AND sh.WAKTU_CHANGE >= ? AND sh.WAKTU_CHANGE < ?";
         
@@ -499,7 +503,8 @@ $active_page = 'laporan';
                                                     ($h['TIPE_PERUBAHAN'] == 'OPNAME' ? 'bg-warning' : 
                                                     ($h['TIPE_PERUBAHAN'] == 'RUSAK' ? 'bg-danger' : 
                                                     ($h['TIPE_PERUBAHAN'] == 'KOREKSI' ? 'bg-warning' : 'bg-primary')))); 
-                                                ?>">
+                                                ?>" 
+                                                style="<?php echo $h['TIPE_PERUBAHAN'] == 'KOREKSI' ? 'background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%) !important;' : ''; ?>">
                                                 <?php echo formatTipePerubahan($h['TIPE_PERUBAHAN']); ?>
                                             </span>
                                         </td>
@@ -512,9 +517,12 @@ $active_page = 'laporan';
                                         <td>
                                             <?php 
                                             // Kolom Referensi Batch: silangkan dengan tabel terkait
-                                            if (in_array($h['TIPE_PERUBAHAN'], ['PEMESANAN', 'KOREKSI']) && !empty($h['REF'])) {
-                                                // REF untuk PEMESANAN dan KOREKSI adalah ID_PESAN_BARANG
+                                            if ($h['TIPE_PERUBAHAN'] == 'PEMESANAN' && !empty($h['REF'])) {
+                                                // REF untuk PEMESANAN adalah ID_PESAN_BARANG
                                                 echo htmlspecialchars($h['REF']);
+                                            } elseif ($h['TIPE_PERUBAHAN'] == 'KOREKSI' && !empty($h['ID_PESAN_KOREKSI'])) {
+                                                // Untuk KOREKSI: ambil ID_PESAN_BARANG dari DETAIL_TRANSFER_BARANG_BATCH
+                                                echo htmlspecialchars($h['ID_PESAN_KOREKSI']);
                                             } elseif ($h['TIPE_PERUBAHAN'] == 'TRANSFER' && !empty($h['ID_PESAN_TRANSFER'])) {
                                                 // Untuk TRANSFER: ambil ID_PESAN_BARANG dari DETAIL_TRANSFER_BARANG_BATCH
                                                 echo htmlspecialchars($h['ID_PESAN_TRANSFER']);

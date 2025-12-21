@@ -241,13 +241,13 @@ $active_page = 'laporan';
                                     <td><?php echo htmlspecialchars($row['NAMA_BARANG']); ?></td>
                                     <td><?php echo number_format($row['BERAT'], 0, ',', '.'); ?></td>
                                     <td>
-                                        <span class="text-danger fw-bold">
-                                            <?php echo number_format($row['TOTAL_BARANG_PIECES'], 0, ',', '.'); ?>
+                                        <span class="<?php echo $row['TOTAL_BARANG_PIECES'] < 0 ? 'text-danger' : ($row['TOTAL_BARANG_PIECES'] > 0 ? 'text-success' : 'text-muted'); ?> fw-bold">
+                                            <?php echo ($row['TOTAL_BARANG_PIECES'] > 0 ? '+' : '') . number_format($row['TOTAL_BARANG_PIECES'], 0, ',', '.'); ?>
                                         </span>
                                     </td>
                                     <td><?php echo formatRupiah($row['HARGA_BARANG_PIECES']); ?></td>
                                     <td>
-                                        <span class="text-danger fw-bold">
+                                        <span class="<?php echo $row['TOTAL_UANG'] < 0 ? 'text-danger' : ($row['TOTAL_UANG'] > 0 ? 'text-success' : 'text-muted'); ?> fw-bold">
                                             <?php echo formatRupiah($row['TOTAL_UANG']); ?>
                                         </span>
                                     </td>

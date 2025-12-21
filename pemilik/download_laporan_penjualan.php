@@ -280,27 +280,27 @@ function formatRupiah($angka) {
         <div class="summary-section">
             <div class="summary-card">
                 <div class="value"><?php echo number_format($summary['TOTAL_TRANSAKSI'], 0, ',', '.'); ?></div>
-                <div class="label">Total Transaksi</div>
+                <div class="label">Volume Transaksi</div>
             </div>
             <div class="summary-card">
                 <div class="value"><?php echo number_format($summary['TOTAL_BARANG_TERJUAL'], 0, ',', '.'); ?></div>
-                <div class="label">Total Barang Terjual</div>
+                <div class="label">Kuantitas Penjualan</div>
             </div>
             <div class="summary-card">
                 <div class="value"><?php echo formatRupiah($summary['TOTAL_PENJUALAN']); ?></div>
-                <div class="label">Sub Total Jual</div>
+                <div class="label">Pendapatan Penjualan</div>
             </div>
             <div class="summary-card">
                 <div class="value"><?php echo formatRupiah($summary['TOTAL_BELI']); ?></div>
-                <div class="label">Sub Total Beli</div>
+                <div class="label">Beban Pokok Penjualan</div>
             </div>
             <div class="summary-card">
                 <div class="value"><?php echo formatRupiah($summary['TOTAL_GROSS_PROFIT']); ?></div>
-                <div class="label">Gross Profit</div>
+                <div class="label">Laba Kotor</div>
             </div>
             <div class="summary-card">
                 <div class="value"><?php echo formatRupiah($summary['TOTAL_GRAND_TOTAL']); ?></div>
-                <div class="label">Grand Total</div>
+                <div class="label">Penerimaan Kas Bruto</div>
             </div>
         </div>
         
@@ -313,7 +313,7 @@ function formatRupiah($angka) {
                     <th style="width: 15%;">Kasir</th>
                     <th style="width: 10%;" class="text-center">Jumlah Barang</th>
                     <th style="width: 15%;" class="text-right">Pajak</th>
-                    <th style="width: 20%;" class="text-right">Grand Total</th>
+                    <th style="width: 20%;" class="text-right">Penerimaan Kas Bruto</th>
                 </tr>
             </thead>
             <tbody>
@@ -341,13 +341,13 @@ function formatRupiah($angka) {
         </table>
         
         <div class="footer-summary">
-            <p><strong>Total Transaksi: <?php echo number_format($summary['TOTAL_TRANSAKSI'], 0, ',', '.'); ?></strong></p>
-            <p><strong>Total Barang Terjual: <?php echo number_format($summary['TOTAL_BARANG_TERJUAL'], 0, ',', '.'); ?></strong></p>
-            <p><strong>Sub Total Jual: <?php echo formatRupiah($summary['TOTAL_PENJUALAN']); ?></strong></p>
-            <p><strong>Sub Total Beli: <?php echo formatRupiah($summary['TOTAL_BELI']); ?></strong></p>
-            <p><strong>Gross Profit: <?php echo formatRupiah($summary['TOTAL_GROSS_PROFIT']); ?></strong></p>
+            <p><strong>Volume Transaksi: <?php echo number_format($summary['TOTAL_TRANSAKSI'], 0, ',', '.'); ?></strong></p>
+            <p><strong>Kuantitas Penjualan: <?php echo number_format($summary['TOTAL_BARANG_TERJUAL'], 0, ',', '.'); ?></strong></p>
+            <p><strong>Pendapatan Penjualan: <?php echo formatRupiah($summary['TOTAL_PENJUALAN']); ?></strong></p>
+            <p><strong>Beban Pokok Penjualan: <?php echo formatRupiah($summary['TOTAL_BELI']); ?></strong></p>
+            <p><strong>Laba Kotor: <?php echo formatRupiah($summary['TOTAL_GROSS_PROFIT']); ?></strong></p>
             <p><strong>Total Pajak: <?php echo formatRupiah($summary['TOTAL_PAJAK']); ?></strong></p>
-            <p class="total">Grand Total: <?php echo formatRupiah($summary['TOTAL_GRAND_TOTAL']); ?></p>
+            <p class="total">Penerimaan Kas Bruto: <?php echo formatRupiah($summary['TOTAL_GRAND_TOTAL']); ?></p>
         </div>
         
         <div style="margin-top: 30px; text-align: center; color: #666; font-size: 12px;">

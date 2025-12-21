@@ -1101,10 +1101,6 @@ $active_page = 'stock';
                             <input type="text" class="form-control form-control-sm" id="poq_permintaan" readonly style="background-color: #e9ecef;">
                         </div>
                         <div class="col-md-6 mb-2">
-                            <label class="form-label fw-bold">Total Penjualan 1 Tahun (dus)</label>
-                            <input type="text" class="form-control form-control-sm" id="poq_total_pieces" readonly style="background-color: #e9ecef;">
-                        </div>
-                        <div class="col-md-6 mb-2">
                             <label class="form-label fw-bold">Setup Cost (Biaya Administrasi Pemesanan)</label>
                             <input type="text" class="form-control form-control-sm" id="poq_biaya_administrasi" readonly style="background-color: #e9ecef;">
                         </div>
@@ -1507,9 +1503,6 @@ $active_page = 'stock';
                         // Demand rate sudah dalam DUS per hari
                         var demandRateDus = response.demand_rate || 0;
                         $('#poq_permintaan').val(demandRateDus.toLocaleString('id-ID', {minimumFractionDigits: 4, maximumFractionDigits: 4}) + ' dus/hari');
-                        // Total penjualan dalam DUS (bukan pieces)
-                        var totalDusYear = response.total_dus_year || 0;
-                        $('#poq_total_pieces').val(totalDusYear.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' dus');
                         $('#poq_biaya_administrasi').val('Rp. ' + (response.setup_cost ? parseFloat(response.setup_cost).toLocaleString('id-ID') : '0'));
                         $('#poq_biaya_holding').val('Rp. ' + (response.holding_cost ? parseFloat(response.holding_cost).toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '/dus/hari' : '0'));
                         $('#poq_lead_time').val((response.lead_time || 0) + ' hari');
@@ -1724,7 +1717,6 @@ $active_page = 'stock';
             $('#poq_nama_barang').val('');
             $('#poq_status_barang').val('');
             $('#poq_permintaan').val('');
-            $('#poq_total_pieces').val('');
             $('#poq_biaya_administrasi').val('');
             $('#poq_biaya_holding').val('');
             $('#poq_lead_time').val('');

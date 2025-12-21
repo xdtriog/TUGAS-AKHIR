@@ -65,6 +65,122 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
     exit();
 }
 
+// Handle AJAX request untuk get detail transfer (untuk popup lihat detail)
+if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_detail_transfer'])) {
+    header('Content-Type: application/json');
+    
+    $id_transfer = isset($_GET['id_transfer']) ? trim($_GET['id_transfer']) : '';
+    
+    if (empty($id_transfer)) {
+        echo json_encode(['success' => false, 'message' => 'Data tidak valid!']);
+        exit();
+    }
+    
+    // Get data DETAIL_TRANSFER_BARANG dan DETAIL_TRANSFER_BARANG_BATCH
+    $query_detail = "SELECT 
+        dtb.ID_DETAIL_TRANSFER_BARANG,
+        dtb.KD_BARANG,
+        dtb.TOTAL_PESAN_TRANSFER_DUS,
+        dtb.TOTAL_KIRIM_DUS,
+        dtb.TOTAL_TIBA_DUS,
+        dtb.TOTAL_DITOLAK_DUS,
+        dtb.TOTAL_MASUK_DUS,
+        dtb.STATUS as STATUS_DETAIL,
+        mb.NAMA_BARANG,
+        mb.BERAT,
+        mb.SATUAN_PERDUS,
+        COALESCE(mm.NAMA_MEREK, '-') as NAMA_MEREK,
+        COALESCE(mk.NAMA_KATEGORI, '-') as NAMA_KATEGORI,
+        dtbb.ID_DETAIL_TRANSFER_BARANG_BATCH,
+        dtbb.ID_PESAN_BARANG,
+        dtbb.JUMLAH_PESAN_TRANSFER_BATCH_DUS,
+        dtbb.JUMLAH_KIRIM_DUS,
+        dtbb.JUMLAH_TIBA_DUS,
+        dtbb.JUMLAH_DITOLAK_DUS,
+        dtbb.JUMLAH_MASUK_DUS,
+        pb.TGL_EXPIRED,
+        COALESCE(ms.NAMA_SUPPLIER, '-') as NAMA_SUPPLIER
+    FROM DETAIL_TRANSFER_BARANG dtb
+    INNER JOIN MASTER_BARANG mb ON dtb.KD_BARANG = mb.KD_BARANG
+    LEFT JOIN MASTER_MEREK mm ON mb.KD_MEREK_BARANG = mm.KD_MEREK_BARANG
+    LEFT JOIN MASTER_KATEGORI_BARANG mk ON mb.KD_KATEGORI_BARANG = mk.KD_KATEGORI_BARANG
+    LEFT JOIN DETAIL_TRANSFER_BARANG_BATCH dtbb ON dtb.ID_DETAIL_TRANSFER_BARANG = dtbb.ID_DETAIL_TRANSFER_BARANG
+    LEFT JOIN PESAN_BARANG pb ON dtbb.ID_PESAN_BARANG = pb.ID_PESAN_BARANG
+    LEFT JOIN MASTER_SUPPLIER ms ON pb.KD_SUPPLIER = ms.KD_SUPPLIER
+    WHERE dtb.ID_TRANSFER_BARANG = ?
+    ORDER BY dtb.ID_DETAIL_TRANSFER_BARANG ASC, pb.TGL_EXPIRED ASC";
+    
+    $stmt_detail = $conn->prepare($query_detail);
+    if (!$stmt_detail) {
+        echo json_encode(['success' => false, 'message' => 'Gagal prepare query: ' . $conn->error]);
+        exit();
+    }
+    $stmt_detail->bind_param("s", $id_transfer);
+    if (!$stmt_detail->execute()) {
+        echo json_encode(['success' => false, 'message' => 'Gagal execute query: ' . $stmt_detail->error]);
+        exit();
+    }
+    $result_detail = $stmt_detail->get_result();
+    
+    $detail_map = [];
+    while ($row = $result_detail->fetch_assoc()) {
+        $id_detail = $row['ID_DETAIL_TRANSFER_BARANG'];
+        
+        if (!isset($detail_map[$id_detail])) {
+            $detail_map[$id_detail] = [
+                'id_detail_transfer' => $id_detail,
+                'kd_barang' => $row['KD_BARANG'],
+                'nama_barang' => $row['NAMA_BARANG'],
+                'nama_merek' => $row['NAMA_MEREK'],
+                'nama_kategori' => $row['NAMA_KATEGORI'],
+                'berat' => $row['BERAT'],
+                'satuan_perdus' => $row['SATUAN_PERDUS'],
+                'total_pesan_dus' => $row['TOTAL_PESAN_TRANSFER_DUS'],
+                'total_kirim_dus' => $row['TOTAL_KIRIM_DUS'],
+                'total_tiba_dus' => $row['TOTAL_TIBA_DUS'] ?? 0,
+                'total_ditolak_dus' => $row['TOTAL_DITOLAK_DUS'] ?? 0,
+                'total_masuk_dus' => $row['TOTAL_MASUK_DUS'] ?? 0,
+                'status_detail' => $row['STATUS_DETAIL'],
+                'batches' => []
+            ];
+        }
+        
+        if (!empty($row['ID_DETAIL_TRANSFER_BARANG_BATCH'])) {
+            $tgl_expired_display = '-';
+            if (!empty($row['TGL_EXPIRED'])) {
+                $date_expired = new DateTime($row['TGL_EXPIRED']);
+                $bulan = [
+                    1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
+                    5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
+                    9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
+                ];
+                $tgl_expired_display = $date_expired->format('d') . ' ' . $bulan[(int)$date_expired->format('m')] . ' ' . $date_expired->format('Y');
+            }
+            
+            $detail_map[$id_detail]['batches'][] = [
+                'id_detail_transfer_batch' => $row['ID_DETAIL_TRANSFER_BARANG_BATCH'],
+                'id_pesan_barang' => $row['ID_PESAN_BARANG'],
+                'jumlah_pesan_batch_dus' => intval($row['JUMLAH_PESAN_TRANSFER_BATCH_DUS'] ?? 0),
+                'jumlah_kirim_dus' => intval($row['JUMLAH_KIRIM_DUS'] ?? 0),
+                'jumlah_tiba_dus' => intval($row['JUMLAH_TIBA_DUS'] ?? 0),
+                'jumlah_ditolak_dus' => intval($row['JUMLAH_DITOLAK_DUS'] ?? 0),
+                'jumlah_masuk_dus' => intval($row['JUMLAH_MASUK_DUS'] ?? 0),
+                'tgl_expired' => $row['TGL_EXPIRED'],
+                'tgl_expired_display' => $tgl_expired_display,
+                'nama_supplier' => $row['NAMA_SUPPLIER']
+            ];
+        }
+    }
+    
+    $detail_data = array_values($detail_map);
+    
+    echo json_encode([
+        'success' => true,
+        'detail_data' => $detail_data
+    ]);
+    exit();
+}
+
 // Handle AJAX request untuk get data transfer (untuk form koreksi)
 if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['get_transfer_data_koreksi'])) {
     header('Content-Type: application/json');
@@ -781,43 +897,46 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
                         // Hitung selisih jumlah masuk untuk batch ini (dalam DUS)
                         $selisih_masuk_batch = $jumlah_masuk_batch_baru - $jumlah_masuk_batch_lama;
                         
-                        // Konversi selisih ke satuan stock yang sesuai
-                        $selisih_masuk_batch_stock = $selisih_masuk_batch;
-                        if ($satuan_toko == 'PIECES') {
-                            $selisih_masuk_batch_stock = $selisih_masuk_batch * $satuan_perdus_toko;
+                        // Hanya catat ke STOCK_HISTORY toko jika ada perubahan jumlah masuk
+                        if ($selisih_masuk_batch != 0) {
+                            // Konversi selisih ke satuan stock yang sesuai
+                            $selisih_masuk_batch_stock = $selisih_masuk_batch;
+                            if ($satuan_toko == 'PIECES') {
+                                $selisih_masuk_batch_stock = $selisih_masuk_batch * $satuan_perdus_toko;
+                            }
+                            
+                            // Untuk STOCK_HISTORY toko per batch:
+                            // JUMLAH_AWAL = stock toko saat ini (dari batch sebelumnya atau stock awal)
+                            // JUMLAH_PERUBAHAN = selisih masuk batch ini (positif karena menambah stock)
+                            // JUMLAH_AKHIR = JUMLAH_AWAL + JUMLAH_PERUBAHAN
+                            // REF = ID_DETAIL_TRANSFER_BARANG_BATCH (berbeda per batch)
+                            
+                            $jumlah_awal_batch_toko = $stock_current_toko;
+                            $jumlah_perubahan_batch_toko = $selisih_masuk_batch_stock; // Positif karena menambah stock
+                            $jumlah_akhir_batch_toko = $jumlah_awal_batch_toko + $jumlah_perubahan_batch_toko;
+                            
+                            $id_history_batch_toko = '';
+                            do {
+                                $uuid = ShortIdGenerator::generate(12, '');
+                                $id_history_batch_toko = 'SKHY' . $uuid;
+                            } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history_batch_toko));
+                            
+                            $insert_history_batch_toko = "INSERT INTO STOCK_HISTORY 
+                                                       (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
+                                                       VALUES (?, ?, ?, ?, ?, ?, ?, 'KOREKSI', ?, ?)";
+                            $stmt_history_batch_toko = $conn->prepare($insert_history_batch_toko);
+                            if (!$stmt_history_batch_toko) {
+                                throw new Exception('Gagal prepare query insert history batch toko: ' . $conn->error);
+                            }
+                            $stmt_history_batch_toko->bind_param("ssssiiiss", $id_history_batch_toko, $kd_barang, $kd_lokasi_tujuan, $user_id, $jumlah_awal_batch_toko, $jumlah_perubahan_batch_toko, $jumlah_akhir_batch_toko, $id_batch_history, $satuan_toko);
+                            if (!$stmt_history_batch_toko->execute()) {
+                                throw new Exception('Gagal insert history batch toko: ' . $stmt_history_batch_toko->error);
+                            }
+                            $stmt_history_batch_toko->close();
+                            
+                            // Update stock_current_toko untuk batch berikutnya
+                            $stock_current_toko = $jumlah_akhir_batch_toko;
                         }
-                        
-                        // Untuk STOCK_HISTORY toko per batch:
-                        // JUMLAH_AWAL = stock toko saat ini (dari batch sebelumnya atau stock awal)
-                        // JUMLAH_PERUBAHAN = selisih masuk batch ini (positif karena menambah stock)
-                        // JUMLAH_AKHIR = JUMLAH_AWAL + JUMLAH_PERUBAHAN
-                        // REF = ID_DETAIL_TRANSFER_BARANG_BATCH (berbeda per batch)
-                        
-                        $jumlah_awal_batch_toko = $stock_current_toko;
-                        $jumlah_perubahan_batch_toko = $selisih_masuk_batch_stock; // Positif karena menambah stock
-                        $jumlah_akhir_batch_toko = $jumlah_awal_batch_toko + $jumlah_perubahan_batch_toko;
-                        
-                        $id_history_batch_toko = '';
-                        do {
-                            $uuid = ShortIdGenerator::generate(12, '');
-                            $id_history_batch_toko = 'SKHY' . $uuid;
-                        } while (checkUUIDExists($conn, 'STOCK_HISTORY', 'ID_HISTORY_STOCK', $id_history_batch_toko));
-                        
-                        $insert_history_batch_toko = "INSERT INTO STOCK_HISTORY 
-                                                   (ID_HISTORY_STOCK, KD_BARANG, KD_LOKASI, UPDATED_BY, JUMLAH_AWAL, JUMLAH_PERUBAHAN, JUMLAH_AKHIR, TIPE_PERUBAHAN, REF, SATUAN)
-                                                   VALUES (?, ?, ?, ?, ?, ?, ?, 'KOREKSI', ?, ?)";
-                        $stmt_history_batch_toko = $conn->prepare($insert_history_batch_toko);
-                        if (!$stmt_history_batch_toko) {
-                            throw new Exception('Gagal prepare query insert history batch toko: ' . $conn->error);
-                        }
-                        $stmt_history_batch_toko->bind_param("ssssiiiss", $id_history_batch_toko, $kd_barang, $kd_lokasi_tujuan, $user_id, $jumlah_awal_batch_toko, $jumlah_perubahan_batch_toko, $jumlah_akhir_batch_toko, $id_batch_history, $satuan_toko);
-                        if (!$stmt_history_batch_toko->execute()) {
-                            throw new Exception('Gagal insert history batch toko: ' . $stmt_history_batch_toko->error);
-                        }
-                        $stmt_history_batch_toko->close();
-                        
-                        // Update stock_current_toko untuk batch berikutnya
-                        $stock_current_toko = $jumlah_akhir_batch_toko;
                         
                         // Hitung selisih lama dan baru untuk kompensasi MUTASI_BARANG_RUSAK
                         $jumlah_kirim_batch_baru = intval($batch['jumlah_kirim_dus'] ?? 0);
@@ -1119,7 +1238,8 @@ $active_page = 'stock';
                                     </td>
                                     <td>
                                         <div class="d-flex flex-wrap gap-1">
-                                            <button class="btn-view btn-sm" onclick="lihatSuratJalan('<?php echo htmlspecialchars($row['ID_TRANSFER_BARANG']); ?>')">Lihat Surat Jalan</button>
+                                            <button class="btn-view btn-sm" onclick="lihatSuratJalan('<?php echo htmlspecialchars($row['ID_TRANSFER_BARANG']); ?>')" style="white-space: nowrap; width: auto;">Lihat Surat Jalan</button>
+                                            <button class="btn-view btn-sm" onclick="lihatDetailTransfer('<?php echo htmlspecialchars($row['ID_TRANSFER_BARANG']); ?>')" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; white-space: nowrap; width: auto;">Lihat Detail Transfer</button>
                                             <?php if ($row['STATUS_TRANSFER'] == 'DIPESAN'): ?>
                                                 <button class="btn btn-danger btn-sm" onclick="batalkanTransfer('<?php echo htmlspecialchars($row['ID_TRANSFER_BARANG']); ?>')">Batalkan</button>
                                             <?php endif; ?>
@@ -1154,6 +1274,48 @@ $active_page = 'stock';
                 </div>
                 <div class="modal-body p-0" style="height: 80vh; overflow: hidden;">
                     <iframe id="suratJalanIframe" src="" style="width: 100%; height: 100%; border: none;"></iframe>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Lihat Detail Transfer -->
+    <div class="modal fade" id="modalDetailTransfer" tabindex="-1" aria-labelledby="modalDetailTransferLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    <h5 class="modal-title" id="modalDetailTransferLabel">Detail Transfer Barang</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+                        <table class="table table-bordered table-hover" id="tableDetailTransfer">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>ID Detail Transfer</th>
+                                    <th>Kode Barang</th>
+                                    <th>Merek</th>
+                                    <th>Kategori</th>
+                                    <th>Nama Barang</th>
+                                    <th>Total Pesan (dus)</th>
+                                    <th>Total Kirim (dus)</th>
+                                    <th>Total Tiba (dus)</th>
+                                    <th>Total Ditolak (dus)</th>
+                                    <th>Total Masuk (dus)</th>
+                                    <th>Status Detail</th>
+                                    <th>Batch</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbodyDetailTransfer">
+                                <tr>
+                                    <td colspan="12" class="text-center text-muted">Memuat data...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
@@ -1271,6 +1433,112 @@ $active_page = 'stock';
             // Buka modal
             var modal = new bootstrap.Modal(document.getElementById('modalLihatSuratJalan'));
             modal.show();
+        }
+
+        function lihatDetailTransfer(idTransfer) {
+            // Load data detail transfer
+            $.ajax({
+                url: '',
+                method: 'GET',
+                data: {
+                    get_detail_transfer: '1',
+                    id_transfer: idTransfer
+                },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.success && response.detail_data.length > 0) {
+                        // Render tabel
+                        renderTabelDetailTransfer(response.detail_data);
+                        
+                        // Buka modal
+                        $('#modalDetailTransfer').modal('show');
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Error!',
+                            text: response.message || 'Gagal memuat data detail transfer!',
+                            confirmButtonColor: '#e74c3c'
+                        });
+                    }
+                },
+                error: function() {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error!',
+                        text: 'Terjadi kesalahan saat memuat data detail transfer!',
+                        confirmButtonColor: '#e74c3c'
+                    });
+                }
+            });
+        }
+
+        function renderTabelDetailTransfer(data) {
+            var tbody = $('#tbodyDetailTransfer');
+            tbody.empty();
+            
+            if (data.length === 0) {
+                tbody.append('<tr><td colspan="12" class="text-center text-muted">Tidak ada data</td></tr>');
+                return;
+            }
+            
+            data.forEach(function(item) {
+                // Render batch info
+                var batchHtml = '';
+                if (item.batches && item.batches.length > 0) {
+                    batchHtml = '<div class="d-flex flex-column gap-2">';
+                    item.batches.forEach(function(batch) {
+                        batchHtml += '<div class="small border rounded p-2">' +
+                            '<strong>ID Batch: ' + escapeHtml(batch.id_pesan_barang) + '</strong><br>' +
+                            '<strong>ID Detail Transfer Batch: ' + escapeHtml(batch.id_detail_transfer_batch) + '</strong><br>' +
+                            '<span class="text-muted">Supplier: ' + escapeHtml(batch.nama_supplier) + '</span><br>' +
+                            '<span class="text-muted">Exp: ' + escapeHtml(batch.tgl_expired_display) + '</span><br>' +
+                            '<span class="text-muted">Pesan: ' + numberFormat(batch.jumlah_pesan_batch_dus) + ' dus</span><br>' +
+                            '<span class="text-muted">Kirim: ' + numberFormat(batch.jumlah_kirim_dus) + ' dus</span><br>' +
+                            '<span class="text-muted">Tiba: ' + numberFormat(batch.jumlah_tiba_dus) + ' dus</span><br>' +
+                            '<span class="text-muted">Ditolak: ' + numberFormat(batch.jumlah_ditolak_dus) + ' dus</span><br>' +
+                            '<span class="text-muted">Masuk: ' + numberFormat(batch.jumlah_masuk_dus) + ' dus</span>' +
+                            '</div>';
+                    });
+                    batchHtml += '</div>';
+                } else {
+                    batchHtml = '<span class="text-muted">-</span>';
+                }
+                
+                var statusClass = '';
+                var statusText = item.status_detail || '-';
+                switch(item.status_detail) {
+                    case 'DIPESAN':
+                        statusClass = 'warning';
+                        break;
+                    case 'DIKIRIM':
+                        statusClass = 'info';
+                        break;
+                    case 'SELESAI':
+                        statusClass = 'success';
+                        break;
+                    case 'DIBATALKAN':
+                        statusClass = 'danger';
+                        break;
+                    default:
+                        statusClass = 'secondary';
+                }
+                
+                var row = '<tr>' +
+                    '<td>' + escapeHtml(item.id_detail_transfer) + '</td>' +
+                    '<td>' + escapeHtml(item.kd_barang) + '</td>' +
+                    '<td>' + escapeHtml(item.nama_merek) + '</td>' +
+                    '<td>' + escapeHtml(item.nama_kategori) + '</td>' +
+                    '<td>' + escapeHtml(item.nama_barang) + '</td>' +
+                    '<td>' + numberFormat(item.total_pesan_dus) + '</td>' +
+                    '<td>' + numberFormat(item.total_kirim_dus) + '</td>' +
+                    '<td>' + numberFormat(item.total_tiba_dus) + '</td>' +
+                    '<td>' + numberFormat(item.total_ditolak_dus) + '</td>' +
+                    '<td>' + numberFormat(item.total_masuk_dus) + '</td>' +
+                    '<td><span class="badge bg-' + statusClass + '">' + escapeHtml(statusText) + '</span></td>' +
+                    '<td style="min-width: 300px;">' + batchHtml + '</td>' +
+                    '</tr>';
+                tbody.append(row);
+            });
         }
 
         function batalkanTransfer(idTransfer) {
