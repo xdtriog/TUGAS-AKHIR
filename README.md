@@ -373,6 +373,8 @@ Project ini adalah skripsi untuk keperluan akademik. Jika ingin berkontribusi at
 
 ## 📄 Lisensi
 
+Project ini dilisensikan di bawah [MIT License](LICENSE).
+
 Project ini tersedia sebagai open source dan dapat digunakan secara bebas untuk keperluan akademik, komersial, atau pengembangan lebih lanjut. Pengguna bebas untuk memodifikasi, mendistribusikan, dan menggunakan project ini sesuai kebutuhan mereka.
 
 ## 👤 Author
