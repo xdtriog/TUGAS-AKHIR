@@ -257,7 +257,7 @@ function formatRupiah($angka) {
     <div class="print-container">
         <div class="header">
             <h2>LAPORAN PERHITUNGAN POQ</h2>
-            <h3>CV. KHARISMA WIJAYA ABADI KUSUMA</h3>
+            <h3>Distributor Frozen Food</h3>
             <p>JL. Rembang - 0813653985</p>
             <p><?php echo htmlspecialchars($lokasi['NAMA_LOKASI']); ?> - <?php echo htmlspecialchars($lokasi['ALAMAT_LOKASI']); ?></p>
         </div>

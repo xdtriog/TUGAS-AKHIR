@@ -214,7 +214,7 @@ function formatRupiah($angka) {
     <div class="print-container">
         <div class="header">
             <h2>PURCHASE ORDER</h2>
-            <h2>CV. KHARISMA WIJAYA ABADI KUSUMA</h2>
+            <h2>Distributor Frozen Food</h2>
             <p>JL. Rembang - 0813653985</p>
         </div>
         

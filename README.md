@@ -1,4 +1,4 @@
-# Sistem Informasi Persediaan - CV. KHARISMA WIJAYA ABADI KUSUMA
+# Sistem Informasi Persediaan - Distributor Frozen Food
 
 Sistem informasi persediaan (Inventory Management System) berbasis web untuk mengelola stok barang frozen food dengan multi-lokasi (Gudang dan Toko), multi-role (Pemilik, Staff Gudang, Staff Toko), dan fitur lengkap untuk manajemen persediaan, transfer barang, penjualan, dan laporan.
 
@@ -373,11 +373,13 @@ Project ini adalah skripsi untuk keperluan akademik. Jika ingin berkontribusi at
 
 ## 📄 Lisensi
 
-Project ini dibuat untuk keperluan skripsi. Semua hak cipta dilindungi.
+Project ini tersedia sebagai open source dan dapat digunakan secara bebas untuk keperluan akademik, komersial, atau pengembangan lebih lanjut. Pengguna bebas untuk memodifikasi, mendistribusikan, dan menggunakan project ini sesuai kebutuhan mereka.
 
 ## 👤 Author
 
-**CV. KHARISMA WIJAYA ABADI KUSUMA**
+**Kevin Dinata**
+
+- LinkedIn: [kevin-dinata-machung](https://www.linkedin.com/in/kevin-dinata-machung/)
 
 ## 📞 Support
 

@@ -259,8 +259,7 @@ function formatNumber($num) {
     
     <div class="nota-container">
         <div class="header">
-            <h3>CV. KHARISMA WIJAYA</h3>
-            <h4>ABADI KUSUMA</h4>
+            <h3>Distributor Frozen Food</h3>
             <p><?php echo htmlspecialchars($nota['ALAMAT_LOKASI']); ?></p>
             <p>Telp: 0813653985</p>
         </div>

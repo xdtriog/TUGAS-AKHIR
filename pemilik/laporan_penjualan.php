@@ -570,8 +570,7 @@ $active_page = 'laporan';
                         // Build HTML nota (menggunakan styling dari cetak_nota.php)
                         var html = '<div class="nota-container">';
                         html += '<div class="header">';
-                        html += '<h3>CV. KHARISMA WIJAYA</h3>';
-                        html += '<h4>ABADI KUSUMA</h4>';
+                        html += '<h3>Distributor Frozen Food</h3>';
                         html += '<p>' + escapeHtml(nota.alamat_lokasi) + '</p>';
                         html += '<p>Telp: 0813653985</p>';
                         html += '</div>';

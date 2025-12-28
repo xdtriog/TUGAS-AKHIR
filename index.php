@@ -88,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <body class="login-page">
     <div class="login-container">
         <h1 class="login-title">Sistem Informasi Persediaan</h1>
-        <p class="company-name">CV. KHARISMA WIJAYA ABADI KUSUMA</p>
+        <p class="company-name">Distributor Frozen Food</p>
         
         <?php if ($error): ?>
             <div class="alert alert-danger" role="alert">
